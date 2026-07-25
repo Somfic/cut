@@ -11,22 +11,22 @@ pub struct Frame {
     pub data: Vec<u8>,
 }
 
-impl Into<image::Handle> for Frame {
-    fn into(self) -> image::Handle {
-        image::Handle::from_rgba(self.width, self.height, self.data)
+impl From<Frame> for image::Handle {
+    fn from(frame: Frame) -> Self {
+        image::Handle::from_rgba(frame.width, frame.height, frame.data)
     }
 }
 
-impl TryInto<Frame> for Sample {
+impl TryFrom<Sample> for Frame {
     type Error = anyhow::Error;
 
-    fn try_into(self) -> Result<Frame, Self::Error> {
-        let caps = self.caps().context("sample had no caps")?;
+    fn try_from(sample: Sample) -> Result<Frame, Self::Error> {
+        let caps = sample.caps().context("sample had no caps")?;
         let info = gst_video::VideoInfo::from_caps(caps).context("caps were not video/x-raw")?;
         let width = info.width();
         let height = info.height();
 
-        let buffer = self.buffer().context("sample had no buffer")?;
+        let buffer = sample.buffer().context("sample had no buffer")?;
         let frame = gst_video::VideoFrameRef::from_buffer_ref_readable(buffer, &info)
             .map_err(|_| anyhow!("failed to map buffer as readable video frame"))?;
 

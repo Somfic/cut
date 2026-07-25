@@ -40,3 +40,9 @@ impl Video {
         })
     }
 }
+
+impl Drop for Video {
+    fn drop(&mut self) {
+        let _ = self.pipeline.set_state(gst::State::Null);
+    }
+}

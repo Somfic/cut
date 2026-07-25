@@ -1,4 +1,4 @@
-use iced::wgpu;
+use iced::{Rectangle, wgpu};
 
 use crate::video::Frame;
 
@@ -6,6 +6,7 @@ pub struct FrameRenderer {
     pipeline: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
     bind_group_layout: wgpu::BindGroupLayout,
+    uniform_buffer: wgpu::Buffer,
     texture: Option<FrameTexture>,
 }
 
@@ -39,6 +40,16 @@ impl iced::widget::shader::Pipeline for FrameRenderer {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
                     count: None,
                 },
             ],
@@ -87,10 +98,19 @@ impl iced::widget::shader::Pipeline for FrameRenderer {
             ..Default::default()
         });
 
+        // vec2<f32> scale, padded to 16 bytes for uniform alignment.
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("video uniforms"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         Self {
             pipeline,
             sampler,
             bind_group_layout,
+            uniform_buffer,
             texture: None,
         }
     }
@@ -129,6 +149,10 @@ impl FrameRenderer {
                         binding: 1,
                         resource: wgpu::BindingResource::Sampler(&self.sampler),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self.uniform_buffer.as_entire_binding(),
+                    },
                 ],
             });
             self.texture = Some(FrameTexture {
@@ -161,6 +185,23 @@ impl FrameRenderer {
         );
     }
 
+    pub fn update_uniforms(&self, queue: &wgpu::Queue, bounds: &Rectangle, vw: u32, vh: u32) {
+        if bounds.height <= 0.0 || vh == 0 {
+            return; // not laid out yet; avoid NaN
+        }
+        let widget_aspect = bounds.width / bounds.height;
+        let video_aspect = vw as f32 / vh as f32;
+        let (sx, sy) = if widget_aspect > video_aspect {
+            (video_aspect / widget_aspect, 1.0)
+        } else {
+            (1.0, widget_aspect / video_aspect)
+        };
+        let mut bytes = [0u8; 16];
+        bytes[0..4].copy_from_slice(&sx.to_le_bytes());
+        bytes[4..8].copy_from_slice(&sy.to_le_bytes());
+        queue.write_buffer(&self.uniform_buffer, 0, &bytes);
+    }
+
     pub fn draw(&self, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
         let Some(tex) = &self.texture else {
             return false; // no frame yet
@@ -177,6 +218,11 @@ struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) uv: vec2<f32>,
 };
+
+struct Uniforms {
+    scale: vec2<f32>,
+};
+@group(0) @binding(2) var<uniform> uniforms: Uniforms;
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
@@ -195,6 +241,12 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return textureSample(frame_texture, frame_sampler, in.uv);
+    // Expand uv outward from the center by 1/scale, so the video occupies
+    // only the `scale`-sized central region and the rest maps outside [0,1].
+    let c = (in.uv - vec2<f32>(0.5)) / uniforms.scale + vec2<f32>(0.5);
+    if (c.x < 0.0 || c.x > 1.0 || c.y < 0.0 || c.y > 1.0) {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0); // black bar
+    }
+    return textureSample(frame_texture, frame_sampler, c);
 }
 "#;

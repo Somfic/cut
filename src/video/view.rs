@@ -19,11 +19,12 @@ impl iced::widget::shader::Primitive for FramePrimitive {
         renderer: &mut Self::Pipeline,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        _bounds: &Rectangle,
+        bounds: &Rectangle,
         _viewport: &Viewport,
     ) {
         if let Some(frame) = &self.frame {
             renderer.upload(device, queue, frame);
+            renderer.update_uniforms(queue, bounds, frame.width, frame.height);
         }
     }
 

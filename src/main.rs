@@ -1,48 +1,56 @@
-use iced::widget::{Column, Row, button, column, row, text};
+use iced::{
+    Element,
+    widget::{Column, Row, button, column, container, image, row, text},
+};
 
 use crate::decoder::decode_frame;
 
 mod decoder;
 
-// state
 #[derive(Default)]
-struct Counter {
-    value: i32,
+struct Screen {
+    frame: Option<image::Handle>,
 }
 
-// interactions
-#[derive(Debug, Clone, Copy)]
-pub enum Message {
-    Increment,
-    Decrement,
-}
+enum Message {}
 
-impl Counter {
-    pub fn view(&self) -> Row<'_, Message> {
-        row![
-            button("+").on_press(Message::Increment),
-            text(self.value).size(50),
-            button("-").on_press(Message::Decrement)
-        ]
+impl Screen {
+    pub fn view(&self) -> Element<Message> {
+        let content = match &self.frame {
+            Some(handle) => Element::from(image(handle.clone())),
+            None => Element::from(text("decoding…")),
+        };
+
+        container(content)
+            .center_x(iced::Fill)
+            .center_y(iced::Fill)
+            .into()
     }
 
-    pub fn update(&mut self, message: Message) {
-        match message {
-            Message::Increment => self.value += 1,
-            Message::Decrement => self.value -= 1,
-        }
-    }
+    pub fn update(&mut self, message: Message) {}
 }
 
 fn main() -> anyhow::Result<()> {
     // setup gstreamer
     gstreamer::init()?;
 
-    let frame = decode_frame("/Users/lucas/Downloads/Naamloos.m4v")?;
-
-    println!("{frame:?}");
-
-    iced::run(Counter::update, Counter::view)?;
+    iced::application(
+        move || {
+            (
+                Screen {
+                    frame: Some(
+                        decode_frame("/Users/lucas/Downloads/Naamloos.m4v")
+                            .unwrap()
+                            .into(),
+                    ),
+                },
+                iced::Task::none(),
+            )
+        },
+        Screen::update,
+        Screen::view,
+    )
+    .run()?;
 
     Ok(())
 }

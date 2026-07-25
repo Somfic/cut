@@ -1,9 +1,10 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, anyhow};
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use gstreamer_video as gst_video;
 use gstreamer_video::prelude::*;
+use iced::widget::image;
 use std::fmt::Debug;
 use std::path::PathBuf;
 
@@ -11,6 +12,12 @@ pub struct Frame {
     pub width: u32,
     pub height: u32,
     pub data: Vec<u8>,
+}
+
+impl Into<image::Handle> for Frame {
+    fn into(self) -> image::Handle {
+        image::Handle::from_rgba(self.width, self.height, self.data)
+    }
 }
 
 impl Debug for Frame {

@@ -2,19 +2,12 @@ use anyhow::{Context, anyhow};
 use gstreamer::Sample;
 use gstreamer_video as gst_video;
 use gstreamer_video::prelude::*;
-use iced::widget::image;
 use std::fmt::Debug;
 
 pub struct Frame {
     pub width: u32,
     pub height: u32,
     pub data: Vec<u8>,
-}
-
-impl From<Frame> for image::Handle {
-    fn from(frame: Frame) -> Self {
-        image::Handle::from_rgba(frame.width, frame.height, frame.data)
-    }
 }
 
 impl TryFrom<Sample> for Frame {

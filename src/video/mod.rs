@@ -1,14 +1,21 @@
 use anyhow::{Context, anyhow};
 use gstreamer as gst;
-use gstreamer::Pipeline;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use gstreamer_app::AppSink;
 use std::path::PathBuf;
 
+mod frame;
+mod renderer;
+mod view;
+
+pub use frame::Frame;
+pub use renderer::FrameRenderer;
+pub use view::VideoView;
+
 pub struct Video {
     pub path: PathBuf,
-    pub pipeline: Pipeline,
+    pub pipeline: gst::Pipeline,
     pub sink: AppSink,
 }
 

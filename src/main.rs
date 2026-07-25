@@ -1,38 +1,42 @@
-use crate::{decoder::Frame, video::Video};
+use std::sync::Arc;
+
+use crate::video::{Frame, Video, VideoView};
 use gstreamer::{self as gst, State, prelude::ElementExt};
-use gstreamer_app::{AppSinkCallbacks, app_sink::AppSinkCallbacksBuilder};
+use gstreamer_app::AppSinkCallbacks;
 use iced::futures::channel::mpsc;
 use iced::futures::{SinkExt, StreamExt};
+use iced::widget::shader;
 use iced::{
-    Element, Program, Subscription,
+    Element, Subscription,
     futures::Stream,
-    widget::{Column, Row, button, column, container, image, row, text},
+    widget::{container, text},
 };
-use std::{thread, time::Duration};
 
-mod decoder;
 mod video;
 
 #[derive(Default)]
 struct Screen {
-    frame: Option<image::Handle>,
+    frame: Option<Arc<Frame>>,
 }
 
 enum Message {
-    Frame(image::Handle),
+    Frame(Arc<Frame>),
 }
 
 impl Screen {
     pub fn view(&self) -> Element<'_, Message> {
-        let content = match &self.frame {
-            Some(handle) => Element::from(image(handle.clone())),
-            None => Element::from(text("decoding…")),
-        };
-
-        container(content)
-            .center_x(iced::Fill)
-            .center_y(iced::Fill)
-            .into()
+        match &self.frame {
+            Some(frame) => shader(VideoView {
+                frame: Some(frame.clone()),
+            })
+            .width(iced::Fill)
+            .height(iced::Fill)
+            .into(),
+            None => container(text("decoding…"))
+                .center_x(iced::Fill)
+                .center_y(iced::Fill)
+                .into(),
+        }
     }
 
     pub fn update(&mut self, message: Message) {
@@ -47,7 +51,7 @@ impl Screen {
 
     fn video_worker() -> impl Stream<Item = Message> {
         iced::stream::channel(64, async |mut output| {
-            let (frame_sender, mut frame_receiver) = mpsc::channel::<image::Handle>(4);
+            let (frame_sender, mut frame_receiver) = mpsc::channel::<Arc<Frame>>(4);
             let mut eos_sender = frame_sender.clone();
 
             let video = match Video::new("/Users/lucas/Downloads/Naamloos.m4v") {
@@ -66,9 +70,8 @@ impl Screen {
                             let sample = sink.pull_sample().map_err(|_| gst::FlowError::Eos)?;
                             let frame: Frame =
                                 sample.try_into().map_err(|_| gst::FlowError::Error)?;
-                            let image: image::Handle = frame.into();
 
-                            match frame_sender.try_send(image) {
+                            match frame_sender.try_send(Arc::new(frame)) {
                                 Ok(()) => Ok(gst::FlowSuccess::Ok),
                                 Err(e) if e.is_full() => Ok(gst::FlowSuccess::Ok),
                                 Err(_) => Err(gst::FlowError::Eos),

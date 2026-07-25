@@ -1,4 +1,8 @@
-use iced::widget::{Column, button, column, text};
+use iced::widget::{Column, Row, button, column, row, text};
+
+use crate::decoder::decode_frame;
+
+mod decoder;
 
 // state
 #[derive(Default)]
@@ -14,8 +18,8 @@ pub enum Message {
 }
 
 impl Counter {
-    pub fn view(&self) -> Column<'_, Message> {
-        column![
+    pub fn view(&self) -> Row<'_, Message> {
+        row![
             button("+").on_press(Message::Increment),
             text(self.value).size(50),
             button("-").on_press(Message::Decrement)
@@ -30,6 +34,15 @@ impl Counter {
     }
 }
 
-fn main() -> iced::Result {
-    iced::run(Counter::update, Counter::view)
+fn main() -> anyhow::Result<()> {
+    // setup gstreamer
+    gstreamer::init()?;
+
+    let frame = decode_frame("/Users/lucas/Downloads/Naamloos.m4v")?;
+
+    println!("{frame:?}");
+
+    iced::run(Counter::update, Counter::view)?;
+
+    Ok(())
 }

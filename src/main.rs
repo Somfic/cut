@@ -50,7 +50,13 @@ impl Screen {
             let (frame_sender, mut frame_receiver) = mpsc::channel::<image::Handle>(4);
             let mut eos_sender = frame_sender.clone();
 
-            let video = Video::new("/Users/lucas/Downloads/Naamloos.m4v").unwrap();
+            let video = match Video::new("/Users/lucas/Downloads/Naamloos.m4v") {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("video failed: {e}");
+                    return;
+                }
+            };
 
             video.sink.set_callbacks(
                 AppSinkCallbacks::builder()

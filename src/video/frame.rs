@@ -3,10 +3,12 @@ use gstreamer::Sample;
 use gstreamer_video as gst_video;
 use gstreamer_video::prelude::*;
 use std::fmt::Debug;
+use std::time::Duration;
 
 pub struct Frame {
     pub width: u32,
     pub height: u32,
+    pub time: Duration,
     pub data: Vec<u8>,
 }
 
@@ -23,6 +25,8 @@ impl TryFrom<Sample> for Frame {
         let frame = gst_video::VideoFrameRef::from_buffer_ref_readable(buffer, &info)
             .map_err(|_| anyhow!("failed to map buffer as readable video frame"))?;
 
+        let time = buffer.pts().map(Duration::from).unwrap_or_default();
+
         // copy over
         let src = frame.plane_data(0).map_err(|_| anyhow!("no plane 0"))?;
         let src_stride = frame.plane_stride()[0] as usize;
@@ -37,6 +41,7 @@ impl TryFrom<Sample> for Frame {
         Ok(Frame {
             width,
             height,
+            time,
             data,
         })
     }

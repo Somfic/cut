@@ -1,6 +1,8 @@
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use crate::video::{Frame, Video, VideoView};
+use futures_timer::Delay;
 use gstreamer::{self as gst, State, prelude::ElementExt};
 use gstreamer_app::AppSinkCallbacks;
 use iced::futures::channel::mpsc;
@@ -86,8 +88,20 @@ impl Screen {
 
             video.pipeline.set_state(State::Playing).unwrap();
 
-            while let Some(handle) = frame_receiver.next().await {
-                if output.send(Message::Frame(handle)).await.is_err() {
+            let mut start: Option<Instant> = None;
+            let mut first_frame_time: Option<Duration> = None;
+
+            while let Some(frame) = frame_receiver.next().await {
+                let origin = *start.get_or_insert_with(Instant::now);
+                let base = *first_frame_time.get_or_insert(frame.time);
+
+                let target_time = frame.time.saturating_sub(base);
+                let elapsed_time = origin.elapsed();
+                if target_time > elapsed_time {
+                    Delay::new(target_time - elapsed_time).await; // wait
+                }
+
+                if output.send(Message::Frame(frame)).await.is_err() {
                     break;
                 }
             }

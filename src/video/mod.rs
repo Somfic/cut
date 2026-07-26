@@ -41,7 +41,7 @@ impl Video {
         // build pipeline
         let pipeline = gst::parse::launch(
             "filesrc name=src ! decodebin name=dec \
-            dec. ! queue ! videoconvert ! video/x-raw,format=RGBA ! appsink name=video \
+            dec. ! queue ! videoconvert ! video/x-raw,format=RGBA ! appsink name=video max-buffers=1 drop=true \
             dec. ! queue ! audioconvert ! audioresample ! audio/x-raw,format=F32LE,channels=2,rate=48000 ! appsink name=audio",
         )
         .context("failed to parse pipeline")?

@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::clock::Clock;
+use crate::shortcuts::Action;
 use crate::timeline::{Timeline, timeline};
 use crate::video::{Frame, SeekMode, Video, VideoView};
 use futures_timer::Delay;
@@ -18,16 +19,25 @@ use iced::{
     widget::{button, column, container, row, text},
 };
 
+/// Clips are laid end to end on one track, in this order. Only the first is
+/// played — see `video_worker`.
+const SOURCES: &[&str] = &[
+    "/Users/lucas/Downloads/The Beauty Of Game of Thrones.mp4",
+    // Swap for another file to see two different clips.
+    "/Users/lucas/Downloads/The Beauty Of Game of Thrones.mp4",
+];
+
 /// How long to wait for a seek to produce a frame before assuming it never will.
 const SEEK_TIMEOUT: Duration = Duration::from_millis(500);
 
 mod clock;
+mod shortcuts;
 mod timeline;
 mod video;
 
 #[derive(Default)]
 struct Screen {
-    timeline: Timeline,
+    timeline: Arc<Timeline>,
     frame: Option<Arc<Frame>>,
     commands: Option<Sender<Command>>,
     playing: bool,
@@ -42,7 +52,9 @@ pub enum Command {
 #[derive(Clone)]
 pub enum Message {
     Ready(Sender<Command>),
+    Opened(Arc<Timeline>),
     Frame(Arc<Frame>),
+    Shortcut(Action),
     TogglePlayback,
     Seek((i64, SeekMode)),
     SeekTo((usize, SeekMode)),
@@ -94,6 +106,16 @@ impl Screen {
     pub fn update(&mut self, message: Message) {
         match message {
             Message::Ready(tx) => self.commands = Some(tx),
+            // The worker starts playback as soon as it has opened the file.
+            Message::Opened(timeline) => {
+                self.timeline = timeline;
+                self.playing = true;
+            }
+            Message::Shortcut(action) => match action {
+                Action::TogglePlayback => self.update(Message::TogglePlayback),
+                Action::Step(delta) => self.update(Message::Seek((delta, SeekMode::Accurate))),
+                Action::GoToStart => self.update(Message::SeekTo((0, SeekMode::Accurate))),
+            },
             Message::Frame(f) => self.frame = Some(f),
             Message::TogglePlayback => {
                 self.playing = !self.playing;
@@ -105,7 +127,10 @@ impl Screen {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        Subscription::run(Self::video_worker)
+        Subscription::batch([
+            Subscription::run(Self::video_worker),
+            shortcuts::subscription().map(Message::Shortcut),
+        ])
     }
 
     fn send(&mut self, cmd: Command) {
@@ -119,14 +144,32 @@ impl Screen {
             let (command_tx, mut command_rx) = mpsc::channel::<Command>(16);
             output.send(Message::Ready(command_tx)).await.ok();
 
-            let (mut video, mut frames) =
-                match Video::new("/Users/lucas/Downloads/The Beauty Of Game of Thrones.mp4") {
-                    Ok(v) => v,
-                    Err(e) => {
-                        eprintln!("video failed: {e}");
-                        return;
+            // Every source is opened so the timeline knows its length, but only
+            // the first one's frames are consumed: playback does not follow the
+            // timeline yet, it just plays source zero start to finish.
+            let mut sources = Vec::new();
+            let mut playback = None;
+
+            for path in SOURCES {
+                match Video::new(*path) {
+                    Ok((video, frames)) => {
+                        let video = Arc::new(video);
+                        playback.get_or_insert_with(|| (video.clone(), frames));
+                        sources.push(video);
                     }
-                };
+                    Err(e) => eprintln!("could not open {path}: {e}"),
+                }
+            }
+
+            let Some((video, mut frames)) = playback else {
+                eprintln!("no sources could be opened");
+                return;
+            };
+
+            // The pipelines have prerolled by now, so every clip's length is known.
+            let timeline = Arc::new(Timeline::sequence(sources));
+            output.send(Message::Opened(timeline)).await.ok();
+
             video.play();
 
             let mut in_flight: Option<Instant> = None;

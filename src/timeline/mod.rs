@@ -29,6 +29,41 @@ impl Clip {
 }
 
 impl Timeline {
+    /// Each source in full, laid end to end on a single track.
+    pub fn sequence(sources: impl IntoIterator<Item = Arc<Video>>) -> Self {
+        let mut position = 0;
+
+        let clips = sources
+            .into_iter()
+            .map(|video| {
+                let length = video.frame_count().unwrap_or(0);
+                let clip = Clip {
+                    source: video,
+                    position,
+                    source_start: 0,
+                    length,
+                };
+
+                position += length;
+                clip
+            })
+            .collect();
+
+        Timeline {
+            tracks: vec![Track { clips }],
+        }
+    }
+
+    /// Length in frames, i.e. where the last clip ends.
+    pub fn length(&self) -> usize {
+        self.tracks
+            .iter()
+            .flat_map(|track| &track.clips)
+            .map(|clip| clip.position + clip.length)
+            .max()
+            .unwrap_or(0)
+    }
+
     pub fn active_clips(&self, frame: usize) -> Vec<&Clip> {
         self.tracks
             .iter()

@@ -30,7 +30,7 @@ pub struct Video {
     audio_sink: AppSink,
     clock: Clock,
     flush_audio: Arc<AtomicBool>,
-    is_playing: bool,
+    is_playing: AtomicBool,
     audio_playing: Arc<AtomicBool>,
 }
 
@@ -203,6 +203,17 @@ impl Video {
             }
         }); // detach for now
 
+        // Preroll before handing the pipeline over: this decodes the first frame,
+        // which is what makes caps (and so `fps`) and `duration` available.
+        // Without it the first seek would find no fps and silently do nothing.
+        pipeline
+            .set_state(State::Paused)
+            .context("failed to pause pipeline")?;
+        pipeline
+            .state(gst::ClockTime::from_seconds(5))
+            .0
+            .context("pipeline failed to preroll")?;
+
         Ok((
             Video {
                 path,
@@ -212,44 +223,59 @@ impl Video {
                 clock,
                 flush_audio,
                 audio_playing,
-                is_playing: false,
+                is_playing: AtomicBool::new(false),
             },
             frame_receiver,
         ))
     }
 
-    pub fn play(&mut self) {
-        self.is_playing = true;
+    pub fn play(&self) {
+        self.is_playing.store(true, Ordering::Relaxed);
         self.audio_playing.store(true, Ordering::Relaxed);
         self.pipeline.set_state(State::Playing).ok();
     }
 
-    pub fn pause(&mut self) {
-        self.is_playing = false;
+    pub fn pause(&self) {
+        self.is_playing.store(false, Ordering::Relaxed);
         self.audio_playing.store(false, Ordering::Relaxed);
         self.pipeline.set_state(State::Paused).ok();
     }
 
-    pub fn toggle(&mut self) {
-        if self.is_playing {
+    pub fn toggle(&self) {
+        if self.is_playing.load(Ordering::Relaxed) {
             self.pause()
         } else {
             self.play()
         }
     }
 
+    pub fn is_playing(&self) -> bool {
+        self.is_playing.load(Ordering::Relaxed)
+    }
+
+    pub fn duration(&self) -> Option<Duration> {
+        self.pipeline
+            .query_duration::<gst::ClockTime>()
+            .map(|time| Duration::from_nanos(time.nseconds()))
+    }
+
+    /// Total length in frames, for laying a clip out on the timeline.
+    pub fn frame_count(&self) -> Option<usize> {
+        Some((self.duration()?.as_secs_f64() * self.fps()?).round() as usize)
+    }
+
     pub fn position(&self) -> Duration {
         self.clock.position()
     }
 
-    pub fn seek(&mut self, delta_frames: i64, frames: &mut Receiver<Arc<Frame>>, mode: SeekMode) {
+    pub fn seek(&self, delta_frames: i64, frames: &mut Receiver<Arc<Frame>>, mode: SeekMode) {
         let Some(fps) = self.fps() else { return };
         let current = (self.clock.position().as_secs_f64() * fps).round() as i64;
         self.seek_to_frame((current + delta_frames).max(0) as usize, frames, mode);
     }
 
     pub fn seek_to_frame(
-        &mut self,
+        &self,
         frame: usize,
         frames: &mut Receiver<Arc<Frame>>,
         mode: SeekMode,

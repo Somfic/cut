@@ -1,5 +1,5 @@
 use iced::widget::canvas::{self, Frame, Geometry, Path, Stroke, Text};
-use iced::{Color, Element, Point, Rectangle, Renderer, Size, Theme, border, mouse};
+use iced::{Color, Element, Point, Rectangle, Renderer, Size, Theme, border, mouse, window};
 
 use crate::timeline::Timeline;
 
@@ -37,6 +37,10 @@ pub struct State {
     /// The last frame we asked for while dragging, or `None` when not dragging.
     /// Remembered to suppress repeat seeks for a frame we're already on.
     scrubbing: Option<usize>,
+    /// Whether the initial fit-to-width has happened. It can't run until we
+    /// know both the widget's width and the timeline's length, neither of
+    /// which is available when the state is created.
+    fitted: bool,
 }
 
 impl Default for State {
@@ -45,6 +49,7 @@ impl Default for State {
             scroll: 0.0,
             zoom: 2.0,
             scrubbing: None,
+            fitted: false,
         }
     }
 }
@@ -113,6 +118,16 @@ impl<Message> canvas::Program<Message> for TimelineWidget<'_, Message> {
         let position = cursor.position_in(bounds);
 
         match event {
+            canvas::Event::Window(window::Event::RedrawRequested(_)) if !state.fitted => {
+                state.fitted = true;
+
+                let length = self.timeline.length();
+                if length > 0 && bounds.width > 0.0 {
+                    state.zoom = (bounds.width / length as f32).clamp(MIN_ZOOM, MAX_ZOOM);
+                }
+
+                Some(canvas::Action::request_redraw())
+            }
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let point = position?;
                 let frame = state.frame_at(point.x);

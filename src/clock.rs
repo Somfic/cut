@@ -7,8 +7,9 @@ use std::time::Duration;
 pub struct Clock {
     frames_played: Arc<AtomicU64>,
     sample_rate: usize,
-    seek_base: Duration,
-    frames_at_seek: u64,
+    /// Nanoseconds. Atomic so playback can be driven through a shared `Video`.
+    seek_base: AtomicU64,
+    frames_at_seek: AtomicU64,
 }
 
 impl Clock {
@@ -16,8 +17,8 @@ impl Clock {
         Clock {
             frames_played: Arc::new(AtomicU64::new(0)),
             sample_rate,
-            seek_base: Duration::ZERO,
-            frames_at_seek: 0,
+            seek_base: AtomicU64::new(0),
+            frames_at_seek: AtomicU64::new(0),
         }
     }
 
@@ -26,13 +27,21 @@ impl Clock {
     }
 
     pub fn position(&self) -> Duration {
+        // Read the base before the counter: if a seek lands in between we
+        // under-report by a few samples rather than reporting a position from
+        // before the seek.
+        let base = Duration::from_nanos(self.seek_base.load(Ordering::Relaxed));
+        let at_seek = self.frames_at_seek.load(Ordering::Relaxed);
         let frames = self.frames_played.load(Ordering::Relaxed);
-        let since_seek = frames.saturating_sub(self.frames_at_seek);
-        self.seek_base + Duration::from_secs_f64(since_seek as f64 / self.sample_rate as f64)
+
+        let since_seek = frames.saturating_sub(at_seek);
+        base + Duration::from_secs_f64(since_seek as f64 / self.sample_rate as f64)
     }
 
-    pub fn seek_to(&mut self, position: Duration) {
-        self.seek_base = position;
-        self.frames_at_seek = self.frames_played.load(Ordering::Relaxed);
+    pub fn seek_to(&self, position: Duration) {
+        self.frames_at_seek
+            .store(self.frames_played.load(Ordering::Relaxed), Ordering::Relaxed);
+        self.seek_base
+            .store(position.as_nanos() as u64, Ordering::Relaxed);
     }
 }

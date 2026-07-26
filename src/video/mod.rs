@@ -109,7 +109,7 @@ impl Video {
     }
 
     pub fn toggle(&mut self) {
-        if self.clock.is_playing() {
+        if self.clock.is_ticking() {
             self.pause()
         } else {
             self.play()
@@ -146,6 +146,6 @@ impl Video {
 
 impl Drop for Video {
     fn drop(&mut self) {
-        let _ = self.pipeline.set_state(gst::State::Null);
+        let _ = self.pipeline.set_state(State::Null);
     }
 }

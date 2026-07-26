@@ -55,17 +55,32 @@ impl Video {
             .map_err(|_| anyhow!("'sink' was not an AppSink"))?;
 
         // callbacks
-        let (mut frame_sender, frame_receiver) = mpsc::channel::<Arc<Frame>>(4);
+        let (frame_sender, frame_receiver) = mpsc::channel::<Arc<Frame>>(4);
         let mut eos_sender = frame_sender.clone();
         sink.set_callbacks(
             AppSinkCallbacks::builder()
-                .new_sample(move |sink| {
-                    let sample = sink.pull_sample().map_err(|_| gst::FlowError::Eos)?;
-                    let frame: Frame = sample.try_into().map_err(|_| gst::FlowError::Error)?;
-                    match frame_sender.try_send(Arc::new(frame)) {
-                        Ok(()) => Ok(gst::FlowSuccess::Ok),
-                        Err(e) if e.is_full() => Ok(gst::FlowSuccess::Ok),
-                        Err(_) => Err(gst::FlowError::Eos),
+                .new_sample({
+                    let mut frame_sender = frame_sender.clone();
+                    move |sink| {
+                        let sample = sink.pull_sample().map_err(|_| gst::FlowError::Eos)?;
+                        let frame: Frame = sample.try_into().map_err(|_| gst::FlowError::Error)?;
+                        match frame_sender.try_send(Arc::new(frame)) {
+                            Ok(()) => Ok(gst::FlowSuccess::Ok),
+                            Err(e) if e.is_full() => Ok(gst::FlowSuccess::Ok),
+                            Err(_) => Err(gst::FlowError::Eos),
+                        }
+                    }
+                })
+                .new_preroll({
+                    let mut frame_sender = frame_sender.clone();
+                    move |sink| {
+                        let sample = sink.pull_preroll().map_err(|_| gst::FlowError::Eos)?;
+                        let frame: Frame = sample.try_into().map_err(|_| gst::FlowError::Error)?;
+                        match frame_sender.try_send(Arc::new(frame)) {
+                            Ok(()) => Ok(gst::FlowSuccess::Ok),
+                            Err(e) if e.is_full() => Ok(gst::FlowSuccess::Ok),
+                            Err(_) => Err(gst::FlowError::Eos),
+                        }
                     }
                 })
                 .eos(move |_| eos_sender.close_channel())

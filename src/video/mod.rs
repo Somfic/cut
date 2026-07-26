@@ -1,10 +1,13 @@
 use anyhow::{Context, anyhow};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use gstreamer::{self as gst, State};
 use gstreamer::{SeekFlags, prelude::*};
 use gstreamer_app::AppSink;
 use gstreamer_app::{self as gst_app, AppSinkCallbacks};
 use gstreamer_video::VideoInfo;
 use iced::futures::channel::mpsc::{self, Receiver};
+use ringbuf::HeapRb;
+use ringbuf::traits::{Consumer, Producer, Split};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,8 +38,9 @@ impl Video {
 
         // build pipeline
         let pipeline = gst::parse::launch(
-            "filesrc name=src ! decodebin ! videoconvert ! \
-            video/x-raw,format=RGBA ! appsink name=sink",
+            "filesrc name=src ! decodebin name=dec \
+            dec. ! queue ! videoconvert ! video/x-raw,format=RGBA ! appsink name=video \
+            dec. ! queue ! audioconvert ! audioresample ! audio/x-raw,format=F32LE,channels=2,rate=48000 ! appsink name=audio",
         )
         .context("failed to parse pipeline")?
         .downcast::<gst::Pipeline>()
@@ -47,17 +51,16 @@ impl Video {
             .context("no element named 'src'")?
             .set_property("location", path_str);
 
-        // app sink
-        let sink = pipeline
-            .by_name("sink")
-            .context("no element named 'sink'")?
+        // video
+        let video_sink = pipeline
+            .by_name("video")
+            .context("no element named 'video'")?
             .downcast::<gst_app::AppSink>()
-            .map_err(|_| anyhow!("'sink' was not an AppSink"))?;
+            .map_err(|_| anyhow!("'video' was not an AppSink"))?;
 
-        // callbacks
         let (frame_sender, frame_receiver) = mpsc::channel::<Arc<Frame>>(4);
         let mut eos_sender = frame_sender.clone();
-        sink.set_callbacks(
+        video_sink.set_callbacks(
             AppSinkCallbacks::builder()
                 .new_sample({
                     let mut frame_sender = frame_sender.clone();
@@ -87,11 +90,60 @@ impl Video {
                 .build(),
         );
 
+        // audio
+        let audio_sink = pipeline
+            .by_name("audio")
+            .context("no element named 'audio'")?
+            .downcast::<gst_app::AppSink>()
+            .map_err(|_| anyhow!("'audio' was not an AppSink"))?;
+
+        let ring = HeapRb::<f32>::new(48_000);
+        let (mut audio_sender, mut audio_receiver) = ring.split();
+        audio_sink.set_callbacks(
+            AppSinkCallbacks::builder()
+                .new_sample(move |sink| {
+                    let sample = sink.pull_sample().map_err(|_| gst::FlowError::Eos)?;
+                    let buffer = sample.buffer().ok_or(gst::FlowError::Error)?;
+                    let map = buffer.map_readable().map_err(|_| gst::FlowError::Error)?;
+                    let samples: &[f32] = bytemuck::cast_slice(&map);
+                    audio_sender.push_slice(samples);
+                    Ok(gst::FlowSuccess::Ok)
+                })
+                .build(),
+        );
+
+        // start audio thread
+        std::thread::spawn(move || {
+            let device = cpal::default_host()
+                .default_output_device()
+                .expect("no output device");
+            let config = cpal::StreamConfig {
+                channels: 2,
+                sample_rate: 48_000,
+                buffer_size: cpal::BufferSize::Default,
+            };
+            let stream = device
+                .build_output_stream(
+                    config,
+                    move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                        let filled = audio_receiver.pop_slice(data);
+                        data[filled..].fill(0.0); // silence on underrun
+                    },
+                    |err| eprintln!("audio stream error: {err}"),
+                    None, // timeout
+                )
+                .expect("build output stream");
+            stream.play().expect("play");
+            loop {
+                std::thread::park();
+            } // hold the stream alive
+        }); // detach for now
+
         Ok((
             Video {
                 path,
                 pipeline,
-                sink,
+                sink: video_sink,
                 clock: Clock::new(),
             },
             frame_receiver,

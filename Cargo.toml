@@ -5,8 +5,11 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
+bytemuck = "1.25.2"
+cpal = "0.18.1"
 futures-timer = "3.0.4"
 gstreamer = "0.25.3"
 gstreamer-app = "0.25.2"
 gstreamer-video = "0.25.3"
 iced = { version = "0.14.0", features = ["wgpu"] }
+ringbuf = "0.5.1"

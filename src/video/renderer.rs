@@ -98,7 +98,6 @@ impl iced::widget::shader::Pipeline for FrameRenderer {
             ..Default::default()
         });
 
-        // vec2<f32> scale, padded to 16 bytes for uniform alignment.
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("video uniforms"),
             size: 16,

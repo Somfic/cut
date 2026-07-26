@@ -1,5 +1,5 @@
 use anyhow::{Context, anyhow};
-use gstreamer::Sample;
+use gstreamer::{Fraction, Sample};
 use gstreamer_video as gst_video;
 use gstreamer_video::prelude::*;
 use std::fmt::Debug;
@@ -8,6 +8,7 @@ use std::time::Duration;
 pub struct Frame {
     pub width: u32,
     pub height: u32,
+    pub fps: Fraction,
     pub time: Duration,
     pub data: Vec<u8>,
 }
@@ -42,6 +43,7 @@ impl TryFrom<Sample> for Frame {
             width,
             height,
             time,
+            fps: info.fps(),
             data,
         })
     }

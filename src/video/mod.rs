@@ -242,15 +242,29 @@ impl Video {
         self.clock.position()
     }
 
-    pub fn seek(&mut self, delta_frames: i64, frames: &mut Receiver<Arc<Frame>>) {
+    pub fn seek(&mut self, delta_frames: i64, frames: &mut Receiver<Arc<Frame>>, mode: SeekMode) {
         let Some(fps) = self.fps() else { return };
         let current = (self.clock.position().as_secs_f64() * fps).round() as i64;
-        let target_frame = (current + delta_frames).max(0);
-        let target = Duration::from_secs_f64(target_frame as f64 / fps);
+        self.seek_to_frame((current + delta_frames).max(0) as usize, frames, mode);
+    }
+
+    pub fn seek_to_frame(
+        &mut self,
+        frame: usize,
+        frames: &mut Receiver<Arc<Frame>>,
+        mode: SeekMode,
+    ) {
+        let Some(fps) = self.fps() else { return };
+        let target = Duration::from_secs_f64(frame as f64 / fps);
+
+        let seekflag = match mode {
+            SeekMode::Fast => SeekFlags::KEY_UNIT,
+            SeekMode::Accurate => SeekFlags::ACCURATE,
+        };
 
         let pos = gst::ClockTime::from_nseconds(target.as_nanos() as u64);
         self.pipeline
-            .seek_simple(SeekFlags::FLUSH | SeekFlags::ACCURATE, pos) // TODO: quick vs accurate seeking
+            .seek_simple(SeekFlags::FLUSH | seekflag, pos)
             .ok();
 
         while let Ok(_) = frames.try_recv() {} // flush video
@@ -271,4 +285,10 @@ impl Drop for Video {
     fn drop(&mut self) {
         let _ = self.pipeline.set_state(State::Null);
     }
+}
+
+#[derive(Clone)]
+pub enum SeekMode {
+    Fast,
+    Accurate,
 }

@@ -11,5 +11,5 @@ futures-timer = "3.0.4"
 gstreamer = "0.25.3"
 gstreamer-app = "0.25.2"
 gstreamer-video = "0.25.3"
-iced = { version = "0.14.0", features = ["wgpu"] }
+iced = { version = "0.14.0", features = ["wgpu", "canvas"] }
 ringbuf = "0.5.1"

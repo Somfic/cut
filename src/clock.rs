@@ -1,43 +1,38 @@
-use std::time::{Duration, Instant};
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
+use std::time::Duration;
 
 pub struct Clock {
-    time_base: Duration,
-    ticking_since: Option<Instant>,
+    frames_played: Arc<AtomicU64>,
+    sample_rate: usize,
+    seek_base: Duration,
+    frames_at_seek: u64,
 }
 
 impl Clock {
-    pub fn new() -> Self {
+    pub fn new(sample_rate: usize) -> Self {
         Clock {
-            time_base: Duration::ZERO,
-            ticking_since: None,
+            frames_played: Arc::new(AtomicU64::new(0)),
+            sample_rate,
+            seek_base: Duration::ZERO,
+            frames_at_seek: 0,
         }
+    }
+
+    pub fn counter(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.frames_played)
     }
 
     pub fn position(&self) -> Duration {
-        match self.ticking_since {
-            Some(t) => self.time_base + t.elapsed(),
-            None => self.time_base,
-        }
+        let frames = self.frames_played.load(Ordering::Relaxed);
+        let since_seek = frames.saturating_sub(self.frames_at_seek);
+        self.seek_base + Duration::from_secs_f64(since_seek as f64 / self.sample_rate as f64)
     }
 
-    pub fn is_ticking(&self) -> bool {
-        self.ticking_since.is_some()
-    }
-
-    pub fn resume(&mut self) {
-        if self.ticking_since.is_none() {
-            self.ticking_since = Some(Instant::now());
-        }
-    }
-    pub fn pause(&mut self) {
-        if let Some(t) = self.ticking_since.take() {
-            self.time_base += t.elapsed();
-        }
-    }
     pub fn seek_to(&mut self, position: Duration) {
-        self.time_base = position;
-        if self.ticking_since.is_some() {
-            self.ticking_since = Some(Instant::now());
-        }
+        self.seek_base = position;
+        self.frames_at_seek = self.frames_played.load(Ordering::Relaxed);
     }
 }

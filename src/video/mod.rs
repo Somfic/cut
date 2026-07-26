@@ -10,6 +10,7 @@ use ringbuf::HeapRb;
 use ringbuf::traits::{Consumer, Producer, Split};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 mod frame;
@@ -27,6 +28,7 @@ pub struct Video {
     pipeline: gst::Pipeline,
     sink: AppSink,
     clock: Clock,
+    is_playing: bool,
 }
 
 impl Video {
@@ -97,7 +99,10 @@ impl Video {
             .downcast::<gst_app::AppSink>()
             .map_err(|_| anyhow!("'audio' was not an AppSink"))?;
 
-        let ring = HeapRb::<f32>::new(48_000);
+        let rate = 48_000; // TODO;
+        let clock = Clock::new(rate);
+
+        let ring = HeapRb::<f32>::new(rate);
         let (mut audio_sender, mut audio_receiver) = ring.split();
         audio_sink.set_callbacks(
             AppSinkCallbacks::builder()
@@ -113,12 +118,14 @@ impl Video {
         );
 
         // start audio thread
+        let channels = 2;
+        let counter = clock.counter();
         std::thread::spawn(move || {
             let device = cpal::default_host()
                 .default_output_device()
                 .expect("no output device");
             let config = cpal::StreamConfig {
-                channels: 2,
+                channels: channels as u16,
                 sample_rate: 48_000,
                 buffer_size: cpal::BufferSize::Default,
             };
@@ -127,6 +134,7 @@ impl Video {
                     config,
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                         let filled = audio_receiver.pop_slice(data);
+                        counter.fetch_add((filled / channels) as u64, Ordering::Relaxed);
                         data[filled..].fill(0.0); // silence on underrun
                     },
                     |err| eprintln!("audio stream error: {err}"),
@@ -144,24 +152,25 @@ impl Video {
                 path,
                 pipeline,
                 sink: video_sink,
-                clock: Clock::new(),
+                clock,
+                is_playing: false,
             },
             frame_receiver,
         ))
     }
 
     pub fn play(&mut self) {
+        self.is_playing = true;
         self.pipeline.set_state(State::Playing).ok();
-        self.clock.resume();
     }
 
     pub fn pause(&mut self) {
+        self.is_playing = false;
         self.pipeline.set_state(State::Paused).ok();
-        self.clock.pause();
     }
 
     pub fn toggle(&mut self) {
-        if self.clock.is_ticking() {
+        if self.is_playing {
             self.pause()
         } else {
             self.play()

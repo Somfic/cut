@@ -31,6 +31,7 @@ pub struct Video {
     clock: Clock,
     flush_audio: Arc<AtomicBool>,
     is_playing: bool,
+    audio_playing: Arc<AtomicBool>,
 }
 
 impl Video {
@@ -124,13 +125,19 @@ impl Video {
         let counter = clock.counter();
 
         let flush_audio = Arc::new(AtomicBool::new(false));
+        let audio_playing = Arc::new(AtomicBool::new(false));
 
         std::thread::spawn({
             let flush_audio = flush_audio.clone();
+            let audio_playing = audio_playing.clone();
 
             // 120ms of audio cushion
             let cushion = (rate as usize) * channels * 120 / 1000;
             let mut priming = true;
+
+            // 6ms audio fade on pause/play
+            let mut gain: f32 = 0.0;
+            let fade_step = 1.0 / (rate as f32 * 0.006);
 
             move || {
                 let device = cpal::default_host()
@@ -150,6 +157,13 @@ impl Video {
                                 priming = true;
                             }
 
+                            let wants_to_play = audio_playing.load(Ordering::Relaxed);
+
+                            if !wants_to_play && gain <= 0.0 {
+                                data.fill(0.0);
+                                return;
+                            }
+
                             if priming {
                                 if audio_receiver.occupied_len() < cushion {
                                     data.fill(0.0); // silence while the cushion refills
@@ -163,6 +177,19 @@ impl Video {
                             if filled < data.len() {
                                 data[filled..].fill(0.0);
                                 priming = true; // underran, start priming
+                            }
+
+                            // use gain to counteract clicking on play/pause
+                            let target = if wants_to_play { 1.0 } else { 0.0 };
+                            for frame in data.chunks_mut(channels) {
+                                gain = if gain < target {
+                                    (gain + fade_step).min(target)
+                                } else {
+                                    (gain - fade_step).max(target)
+                                };
+                                for s in frame {
+                                    *s *= gain;
+                                }
                             }
                         },
                         |err| eprintln!("audio stream error: {err}"),
@@ -184,6 +211,7 @@ impl Video {
                 audio_sink,
                 clock,
                 flush_audio,
+                audio_playing,
                 is_playing: false,
             },
             frame_receiver,
@@ -192,11 +220,13 @@ impl Video {
 
     pub fn play(&mut self) {
         self.is_playing = true;
+        self.audio_playing.store(true, Ordering::Relaxed);
         self.pipeline.set_state(State::Playing).ok();
     }
 
     pub fn pause(&mut self) {
         self.is_playing = false;
+        self.audio_playing.store(false, Ordering::Relaxed);
         self.pipeline.set_state(State::Paused).ok();
     }
 

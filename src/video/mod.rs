@@ -7,10 +7,10 @@ use gstreamer_app::{self as gst_app, AppSinkCallbacks};
 use gstreamer_video::VideoInfo;
 use iced::futures::channel::mpsc::{self, Receiver};
 use ringbuf::HeapRb;
-use ringbuf::traits::{Consumer, Producer, Split};
+use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 mod frame;
@@ -26,8 +26,10 @@ use crate::clock::Clock;
 pub struct Video {
     pub path: PathBuf,
     pipeline: gst::Pipeline,
-    sink: AppSink,
+    video_sink: AppSink,
+    audio_sink: AppSink,
     clock: Clock,
+    flush_audio: Arc<AtomicBool>,
     is_playing: bool,
 }
 
@@ -99,7 +101,8 @@ impl Video {
             .downcast::<gst_app::AppSink>()
             .map_err(|_| anyhow!("'audio' was not an AppSink"))?;
 
-        let rate = 48_000; // TODO;
+        let channels = 2; // TODO
+        let rate = 48_000; // TODO
         let clock = Clock::new(rate);
 
         let ring = HeapRb::<f32>::new(rate);
@@ -118,41 +121,69 @@ impl Video {
         );
 
         // start audio thread
-        let channels = 2;
         let counter = clock.counter();
-        std::thread::spawn(move || {
-            let device = cpal::default_host()
-                .default_output_device()
-                .expect("no output device");
-            let config = cpal::StreamConfig {
-                channels: channels as u16,
-                sample_rate: 48_000,
-                buffer_size: cpal::BufferSize::Default,
-            };
-            let stream = device
-                .build_output_stream(
-                    config,
-                    move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                        let filled = audio_receiver.pop_slice(data);
-                        counter.fetch_add((filled / channels) as u64, Ordering::Relaxed);
-                        data[filled..].fill(0.0); // silence on underrun
-                    },
-                    |err| eprintln!("audio stream error: {err}"),
-                    None, // timeout
-                )
-                .expect("build output stream");
-            stream.play().expect("play");
-            loop {
-                std::thread::park();
-            } // hold the stream alive
+
+        let flush_audio = Arc::new(AtomicBool::new(false));
+
+        std::thread::spawn({
+            let flush_audio = flush_audio.clone();
+
+            // 120ms of audio cushion
+            let cushion = (rate as usize) * channels * 120 / 1000;
+            let mut priming = true;
+
+            move || {
+                let device = cpal::default_host()
+                    .default_output_device()
+                    .expect("no output device");
+                let config = cpal::StreamConfig {
+                    channels: channels as u16,
+                    sample_rate: rate as u32,
+                    buffer_size: cpal::BufferSize::Default,
+                };
+                let stream = device
+                    .build_output_stream(
+                        config,
+                        move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                            if flush_audio.swap(false, Ordering::Relaxed) {
+                                audio_receiver.clear(); // drop stale pre-seek audio
+                                priming = true;
+                            }
+
+                            if priming {
+                                if audio_receiver.occupied_len() < cushion {
+                                    data.fill(0.0); // silence while the cushion refills
+                                    return; // counter did not advance
+                                }
+                                priming = false;
+                            }
+
+                            let filled = audio_receiver.pop_slice(data);
+                            counter.fetch_add((filled / channels) as u64, Ordering::Relaxed);
+                            if filled < data.len() {
+                                data[filled..].fill(0.0);
+                                priming = true; // underran, start priming
+                            }
+                        },
+                        |err| eprintln!("audio stream error: {err}"),
+                        None, // timeout
+                    )
+                    .expect("build output stream");
+                stream.play().expect("play");
+                loop {
+                    std::thread::park();
+                } // hold the stream alive
+            }
         }); // detach for now
 
         Ok((
             Video {
                 path,
                 pipeline,
-                sink: video_sink,
+                video_sink,
+                audio_sink,
                 clock,
+                flush_audio,
                 is_playing: false,
             },
             frame_receiver,
@@ -192,13 +223,14 @@ impl Video {
             .seek_simple(SeekFlags::FLUSH | SeekFlags::ACCURATE, pos) // TODO: quick vs accurate seeking
             .ok();
 
-        while let Ok(_) = frames.try_recv() {}
+        while let Ok(_) = frames.try_recv() {} // flush video
+        self.flush_audio.store(true, Ordering::Relaxed); // flush audio
 
         self.clock.seek_to(target);
     }
 
     pub fn fps(&self) -> Option<f64> {
-        let caps = self.sink.static_pad("sink")?.current_caps()?;
+        let caps = self.video_sink.static_pad("sink")?.current_caps()?;
         let info = VideoInfo::from_caps(&caps).ok()?;
         let fps = info.fps();
         Some(fps.numer() as f64 / fps.denom() as f64)

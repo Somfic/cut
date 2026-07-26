@@ -1,16 +1,11 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::clock::Clock;
 use crate::shortcuts::Action;
 use crate::timeline::{Timeline, timeline};
 use crate::video::{Frame, SeekMode, Video, VideoView};
 use futures_timer::Delay;
-use gstreamer::prelude::ElementExtManual;
-use gstreamer::{self as gst, State, prelude::ElementExt};
-use gstreamer::{Fraction, SeekFlags};
-use gstreamer_app::AppSinkCallbacks;
-use iced::futures::channel::mpsc::{self, Receiver, Sender};
+use iced::futures::channel::mpsc::{self, Sender};
 use iced::futures::{SinkExt, StreamExt, select};
 use iced::widget::shader;
 use iced::{
@@ -19,16 +14,13 @@ use iced::{
     widget::{button, column, container, row, text},
 };
 
-/// Clips are laid end to end on one track, in this order. Only the first is
-/// played — see `video_worker`.
 const SOURCES: &[&str] = &[
-    "/Users/lucas/Downloads/The Beauty Of Game of Thrones.mp4",
-    // Swap for another file to see two different clips.
-    "/Users/lucas/Downloads/The Beauty Of Game of Thrones.mp4",
+    "/home/lucas/lab/data/cinema/fs/torrents/54f05a5e9c55e90bd2eeb24fadd5726bc51d6295/A Knight of the Seven Kingdoms S01E01 The Hedge Knight 2160p HMAX WEB-DL DDP5 1 H 265-NTb.mkv",
 ];
 
 /// How long to wait for a seek to produce a frame before assuming it never will.
 const SEEK_TIMEOUT: Duration = Duration::from_millis(500);
+const LAG_WARN_MS: i64 = 100;
 
 mod clock;
 mod shortcuts;
@@ -89,10 +81,24 @@ impl Screen {
                 .into(),
         };
 
-        let controls = row![
+        let lag = self
+            .timeline
+            .playing_video()
+            .map(|v| v.lag_ms())
+            .unwrap_or(0);
+        let mut controls = row![
             button(if self.playing { "Pause" } else { "Play" }).on_press(Message::TogglePlayback),
         ]
-        .spacing(10);
+        .spacing(10)
+        .align_y(iced::Center);
+
+        // Surface playback falling behind the audio clock — but only while
+        // playing, since a paused clock freezes the lag at its last value.
+        if self.playing && lag > LAG_WARN_MS {
+            controls = controls.push(
+                text(format!("⚠ {lag} ms behind")).color(iced::Color::from_rgb(0.9, 0.25, 0.25)),
+            );
+        }
 
         let timeline = timeline(&self.timeline, self.playhead(), self.fps())
             .on_seek(|frame| Message::SeekTo((frame, SeekMode::Accurate)));
@@ -200,6 +206,11 @@ impl Screen {
                         in_flight = None;
 
                         let target = frame.time;
+
+                        let lag_ms = video.position().as_secs_f64() * 1000.0
+                            - target.as_secs_f64() * 1000.0;
+                        video.set_lag(lag_ms.round() as i64);
+
                         if parked.is_none() && target > video.position() {
                             Delay::new(target - video.position()).await;
                         }

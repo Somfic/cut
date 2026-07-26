@@ -10,14 +10,14 @@ use ringbuf::HeapRb;
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::time::Duration;
 
 mod frame;
 mod renderer;
 mod view;
 
-pub use frame::Frame;
+pub use frame::{Frame, PixelLayout};
 pub use renderer::FrameRenderer;
 pub use view::VideoView;
 
@@ -29,6 +29,9 @@ pub struct Video {
     video_sink: AppSink,
     audio_sink: AppSink,
     clock: Clock,
+    /// Signed milliseconds the last presented frame trailed the master clock
+    /// (positive = behind). Written by the playback loop, read by the UI.
+    lag_ms: AtomicI64,
     flush_audio: Arc<AtomicBool>,
     is_playing: AtomicBool,
     audio_playing: Arc<AtomicBool>,
@@ -44,7 +47,7 @@ impl Video {
         // build pipeline
         let pipeline = gst::parse::launch(
             "filesrc name=src ! decodebin name=dec \
-            dec. ! queue ! videoconvert ! video/x-raw,format=RGBA ! appsink name=video max-buffers=1 drop=true \
+            dec. ! queue ! appsink name=video max-buffers=1 drop=true \
             dec. ! queue ! audioconvert ! audioresample ! audio/x-raw,format=F32LE,channels=2,rate=48000 ! appsink name=audio",
         )
         .context("failed to parse pipeline")?
@@ -221,6 +224,7 @@ impl Video {
                 video_sink,
                 audio_sink,
                 clock,
+                lag_ms: AtomicI64::new(0),
                 flush_audio,
                 audio_playing,
                 is_playing: AtomicBool::new(false),
@@ -268,18 +272,24 @@ impl Video {
         self.clock.position()
     }
 
+    /// Record how far the last presented frame trailed the master clock.
+    pub fn set_lag(&self, ms: i64) {
+        self.lag_ms.store(ms, Ordering::Relaxed);
+    }
+
+    /// Signed milliseconds behind the master clock; positive means the video is
+    /// lagging (can't keep up), negative means it's comfortably ahead.
+    pub fn lag_ms(&self) -> i64 {
+        self.lag_ms.load(Ordering::Relaxed)
+    }
+
     pub fn seek(&self, delta_frames: i64, frames: &mut Receiver<Arc<Frame>>, mode: SeekMode) {
         let Some(fps) = self.fps() else { return };
         let current = (self.clock.position().as_secs_f64() * fps).round() as i64;
         self.seek_to_frame((current + delta_frames).max(0) as usize, frames, mode);
     }
 
-    pub fn seek_to_frame(
-        &self,
-        frame: usize,
-        frames: &mut Receiver<Arc<Frame>>,
-        mode: SeekMode,
-    ) {
+    pub fn seek_to_frame(&self, frame: usize, frames: &mut Receiver<Arc<Frame>>, mode: SeekMode) {
         let Some(fps) = self.fps() else { return };
         let target = Duration::from_secs_f64(frame as f64 / fps);
 

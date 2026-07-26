@@ -54,6 +54,12 @@ impl Timeline {
         }
     }
 
+    /// The source currently driving playback — source zero, the first clip
+    /// (see `video_worker`, which only plays that one for now).
+    pub fn playing_video(&self) -> Option<&Arc<Video>> {
+        self.tracks.first()?.clips.first().map(|clip| &clip.source)
+    }
+
     /// Length in frames, i.e. where the last clip ends.
     pub fn length(&self) -> usize {
         self.tracks

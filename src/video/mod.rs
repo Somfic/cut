@@ -22,17 +22,22 @@ pub struct Video {
 impl Video {
     pub fn new(path: impl Into<PathBuf>) -> anyhow::Result<Self> {
         let path = path.into();
-        let path_str = path.display().to_string();
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| anyhow!("path is not valid UTF-8: {}", path.display()))?;
 
-        let pipeline = format!(
-            "filesrc location={path_str} ! decodebin ! videoconvert ! \
-            video/x-raw,format=RGBA ! appsink name=sink"
-        );
+        let pipeline = gst::parse::launch(
+            "filesrc name=src ! decodebin ! videoconvert ! \
+            video/x-raw,format=RGBA ! appsink name=sink",
+        )
+        .context("failed to parse pipeline")?
+        .downcast::<gst::Pipeline>()
+        .map_err(|_| anyhow!("parsed element was not a Pipeline"))?;
 
-        let pipeline = gst::parse::launch(&pipeline)
-            .context("failed to parse pipeline")?
-            .downcast::<gst::Pipeline>()
-            .map_err(|_| anyhow!("parsed element was not a Pipeline"))?;
+        pipeline
+            .by_name("src")
+            .context("no element named 'src'")?
+            .set_property("location", path_str);
 
         let sink = pipeline
             .by_name("sink")

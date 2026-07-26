@@ -56,7 +56,8 @@ impl Screen {
             let (frame_sender, mut frame_receiver) = mpsc::channel::<Arc<Frame>>(4);
             let mut eos_sender = frame_sender.clone();
 
-            let video = match Video::new("/Users/lucas/Downloads/Naamloos.m4v") {
+            let video = match Video::new("/Users/lucas/Downloads/The Beauty Of Game of Thrones.mp4")
+            {
                 Ok(v) => v,
                 Err(e) => {
                     eprintln!("video failed: {e}");

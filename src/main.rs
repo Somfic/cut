@@ -1,20 +1,22 @@
 mod app;
 mod demo;
+mod input;
 mod media;
 mod playback;
+mod project;
 mod ui;
 
-use app::Screen;
+use app::App;
 
 fn main() -> anyhow::Result<()> {
     gstreamer::init()?;
 
     iced::application(
-        move || (Screen::default(), iced::Task::none()),
-        Screen::update,
-        Screen::view,
+        move || (App::default(), iced::Task::none()),
+        App::update,
+        App::view,
     )
-    .subscription(Screen::subscription)
+    .subscription(App::subscription)
     .run()?;
 
     Ok(())

@@ -6,19 +6,13 @@ use iced::futures::Stream;
 use iced::futures::channel::mpsc::{self, Sender};
 use iced::futures::{FutureExt, SinkExt, StreamExt, select};
 
-use crate::app::Message;
+use crate::app::Event;
 use crate::demo;
-use crate::media::Timeline;
-use crate::playback::{Engine, SeekMode, VideoStream};
+use crate::project::Timeline;
+use crate::playback::{Controls, Engine, PlaybackState, Request, SeekMode, VideoStream};
 
 const SEEK_TIMEOUT: Duration = Duration::from_millis(500);
 const PLAYBACK_STALL: Duration = Duration::from_secs(3);
-
-pub enum Command {
-    TogglePlayback,
-    Seek((i64, SeekMode)),
-    SeekTo((usize, SeekMode)),
-}
 
 /// Move the timeline to `tl_frame`. Every seek, clip boundary and scrub goes
 /// through here, so there is one path from "I want this frame" to the decoders.
@@ -34,10 +28,15 @@ fn cut(
     }
 }
 
-pub fn worker() -> impl Stream<Item = Message> {
-    iced::stream::channel(64, async |mut output: Sender<Message>| {
-        let (command_tx, mut command_rx) = mpsc::channel::<Command>(16);
-        output.send(Message::Ready(command_tx)).await.ok();
+pub fn transport() -> impl Stream<Item = Event> {
+    iced::stream::channel(64, async |mut output: Sender<Event>| {
+        let (command_tx, mut command_rx) = mpsc::channel::<Request>(16);
+        let (mut engine, mut stream) = Engine::new();
+
+        // `playing` is the engine's own flag, not a copy of it.
+        let state = Arc::new(PlaybackState::new(engine.playing_flag()));
+        let controls = Controls::new(command_tx, state.clone());
+        output.send(Event::Ready(controls)).await.ok();
 
         let timeline = match demo::timeline() {
             Ok(timeline) => Arc::new(timeline),
@@ -46,7 +45,7 @@ pub fn worker() -> impl Stream<Item = Message> {
                 return;
             }
         };
-        output.send(Message::Opened(timeline.clone())).await.ok();
+        output.send(Event::Opened(timeline.clone())).await.ok();
 
         let length = timeline.length();
         if length == 0 {
@@ -54,12 +53,10 @@ pub fn worker() -> impl Stream<Item = Message> {
             return;
         }
 
-        let (mut engine, mut video) = Engine::new();
-
         // Accurate: the seek's segment starts exactly at the in-point, so
         // gstreamer drops both audio and video from the keyframe up to it —
         // no leading video frames, and no unrelated leading audio.
-        cut(&mut engine, &timeline, 0, &mut video, SeekMode::Accurate);
+        cut(&mut engine, &timeline, 0, &mut stream, SeekMode::Accurate);
         engine.play();
 
         let mut in_flight: Option<Instant> = None;
@@ -74,24 +71,24 @@ pub fn worker() -> impl Stream<Item = Message> {
             if in_flight.is_none()
                 && let Some((tl_frame, mode)) = parked.take()
             {
-                cut(&mut engine, &timeline, tl_frame, &mut video, mode);
+                cut(&mut engine, &timeline, tl_frame, &mut stream, mode);
                 in_flight = Some(Instant::now());
             }
 
             select! {
                 cmd = command_rx.select_next_some() => match cmd {
-                    Command::TogglePlayback => engine.toggle(),
+                    Request::TogglePlayback => engine.toggle(),
                     // Relative seeks resolve against the last playhead and then
                     // park, so every seek takes the same route through `cut`.
-                    Command::Seek((delta, mode)) => {
+                    Request::Step((delta, mode)) => {
                         parked = Some((
                             playhead.saturating_add_signed(delta as isize).min(length - 1),
                             mode,
                         ));
                     }
-                    Command::SeekTo(seek) => parked = Some(seek),
+                    Request::Seek(seek) => parked = Some(seek),
                 },
-                frame = video.select_next_some() => {
+                frame = stream.select_next_some() => {
                     in_flight = None;
 
                     // Which clip produced this frame — and its fps, since frame
@@ -120,24 +117,24 @@ pub fn worker() -> impl Stream<Item = Message> {
                     // worker never has to know about clip indices.
                     if source_frame >= source_start + clip_len {
                         let next = (position + clip_len) % length;
-                        cut(&mut engine, &timeline, next, &mut video, SeekMode::Accurate);
+                        cut(&mut engine, &timeline, next, &mut stream, SeekMode::Accurate);
                         in_flight = Some(Instant::now());
                         continue;
                     }
 
                     let timeline_frame = position + (source_frame - source_start);
                     playhead = timeline_frame;
-                    output.send(Message::Playhead(timeline_frame)).await.ok();
+                    state.set_playhead(timeline_frame);
 
                     let target = frame.time;
                     let lag_ms = engine.position().as_secs_f64() * 1000.0
                         - target.as_secs_f64() * 1000.0;
-                    output.send(Message::Lag(lag_ms.round() as i64)).await.ok();
+                    state.set_lag_ms(lag_ms.round() as i64);
 
                     if parked.is_none() && target > engine.position() {
                         Delay::new(target - engine.position()).await;
                     }
-                    if output.send(Message::Frame(frame)).await.is_err() { break; }
+                    if output.send(Event::Frame(frame)).await.is_err() { break; }
                 }
                 // Watchdog: if no frame arrives for a while, the pipeline has
                 // likely hit EOS (a clip window reached the end of the file) or
@@ -149,7 +146,7 @@ pub fn worker() -> impl Stream<Item = Message> {
                         .live_clip(0)
                         .map(|c| (c.position + c.length) % length)
                         .unwrap_or(0);
-                    cut(&mut engine, &timeline, next, &mut video, SeekMode::Fast);
+                    cut(&mut engine, &timeline, next, &mut stream, SeekMode::Fast);
                     in_flight = Some(Instant::now());
                 }
                 complete => break,

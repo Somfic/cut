@@ -1,46 +1,43 @@
 use std::sync::Arc;
 
-use iced::futures::channel::mpsc::Sender;
 use iced::widget::shader;
 use iced::{
     Element, Subscription,
     widget::{button, column, container, row, text},
 };
 
+use crate::input::{self, Bindings};
 use crate::media::Frame;
-use crate::playback::{Command, SeekMode, worker};
-use crate::media::Timeline;
-use crate::ui::shortcuts::{self, Action};
-use crate::ui::{VideoView, timeline::timeline};
+use crate::playback::{Controls, Request, SeekMode, transport};
+use crate::project::Timeline;
+use crate::ui::{TimelineView, VideoView};
 
 const LAG_WARN_MS: i64 = 100;
 
 #[derive(Default)]
-pub struct Screen {
+pub struct App {
     timeline: Arc<Timeline>,
     frame: Option<Arc<Frame>>,
-    commands: Option<Sender<Command>>,
-    playing: bool,
-    /// Latest playback lag reported by the worker (ms behind the clock).
-    lag_ms: i64,
-    /// Timeline frame the worker is currently presenting.
-    playhead: usize,
+    controls: Option<Controls>,
+    bindings: Bindings,
 }
 
 #[derive(Clone)]
-pub enum Message {
-    Ready(Sender<Command>),
+pub enum Event {
+    Ready(Controls),
     Opened(Arc<Timeline>),
     Frame(Arc<Frame>),
-    Lag(i64),
-    Playhead(usize),
-    Shortcut(Action),
-    TogglePlayback,
-    Seek((i64, SeekMode)),
-    SeekTo((usize, SeekMode)),
+    Request(Request),
+    Keypress(iced::keyboard::Key, iced::keyboard::Modifiers),
 }
 
-impl Screen {
+impl From<Request> for Event {
+    fn from(request: Request) -> Self {
+        Event::Request(request)
+    }
+}
+
+impl App {
     fn fps(&self) -> f64 {
         self.frame
             .as_ref()
@@ -50,11 +47,19 @@ impl Screen {
     }
 
     fn playhead(&self) -> usize {
-        self.playhead
+        self.controls.as_ref().map_or(0, Controls::playhead)
     }
 
-    pub fn view(&self) -> Element<'_, Message> {
-        let preview: Element<'_, Message> = match &self.frame {
+    fn playing(&self) -> bool {
+        self.controls.as_ref().is_some_and(Controls::is_playing)
+    }
+
+    fn lag_ms(&self) -> i64 {
+        self.controls.as_ref().map_or(0, Controls::lag_ms)
+    }
+
+    pub fn view(&self) -> Element<'_, Event> {
+        let preview: Element<'_, Event> = match &self.frame {
             Some(frame) => shader(VideoView {
                 frame: Some(frame.clone()),
             })
@@ -67,23 +72,22 @@ impl Screen {
                 .into(),
         };
 
-        let lag = self.lag_ms;
+        let lag = self.lag_ms();
         let mut controls = row![
-            button(if self.playing { "Pause" } else { "Play" }).on_press(Message::TogglePlayback),
+            button(if self.playing() { "Pause" } else { "Play" })
+                .on_press(Request::TogglePlayback.into()),
         ]
         .spacing(10)
         .align_y(iced::Center);
 
-        // Surface playback falling behind the audio clock — but only while
-        // playing, since a paused clock freezes the lag at its last value.
-        if self.playing && lag > LAG_WARN_MS {
+        if self.playing() && lag > LAG_WARN_MS {
             controls = controls.push(
                 text(format!("⚠ {lag} ms behind")).color(iced::Color::from_rgb(0.9, 0.25, 0.25)),
             );
         }
 
-        let timeline = timeline(&self.timeline, self.playhead(), self.fps())
-            .on_seek(|frame| Message::SeekTo((frame, SeekMode::Accurate)));
+        let timeline = TimelineView::new(&self.timeline, self.playhead(), self.fps())
+            .on_seek(|frame| Request::Seek((frame, SeekMode::Accurate)).into());
 
         column![preview, container(controls).center_x(iced::Fill), timeline,]
             .spacing(10)
@@ -91,41 +95,27 @@ impl Screen {
             .into()
     }
 
-    pub fn update(&mut self, message: Message) {
+    pub fn update(&mut self, message: Event) {
         match message {
-            Message::Ready(tx) => self.commands = Some(tx),
-            // The worker starts playback as soon as it has opened the file.
-            Message::Opened(timeline) => {
-                self.timeline = timeline;
-                self.playing = true;
+            Event::Ready(controls) => self.controls = Some(controls),
+            Event::Opened(timeline) => self.timeline = timeline,
+            Event::Frame(f) => self.frame = Some(f),
+            Event::Request(request) => self.with_controls(|c| c.send(request)),
+            Event::Keypress(key, modifiers) => {
+                for event in self.bindings.resolve(&key, modifiers) {
+                    self.update(event);
+                }
             }
-            Message::Shortcut(action) => match action {
-                Action::TogglePlayback => self.update(Message::TogglePlayback),
-                Action::Step(delta) => self.update(Message::Seek((delta, SeekMode::Accurate))),
-                Action::GoToStart => self.update(Message::SeekTo((0, SeekMode::Accurate))),
-            },
-            Message::Frame(f) => self.frame = Some(f),
-            Message::Lag(ms) => self.lag_ms = ms,
-            Message::Playhead(frame) => self.playhead = frame,
-            Message::TogglePlayback => {
-                self.playing = !self.playing;
-                self.send(Command::TogglePlayback);
-            }
-            Message::Seek((delta, mode)) => self.send(Command::Seek((delta, mode))),
-            Message::SeekTo((frame, mode)) => self.send(Command::SeekTo((frame, mode))),
         }
     }
 
-    pub fn subscription(&self) -> Subscription<Message> {
-        Subscription::batch([
-            Subscription::run(worker),
-            shortcuts::subscription().map(Message::Shortcut),
-        ])
+    pub fn subscription(&self) -> Subscription<Event> {
+        Subscription::batch([Subscription::run(transport), input::keylogger()])
     }
 
-    fn send(&mut self, cmd: Command) {
-        if let Some(tx) = &mut self.commands {
-            let _ = tx.try_send(cmd);
+    fn with_controls(&mut self, f: impl FnOnce(&mut Controls)) {
+        if let Some(controls) = &mut self.controls {
+            f(controls);
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::media::Clip;
+use crate::project::Clip;
 
 pub struct Track {
     pub clips: Vec<Clip>,

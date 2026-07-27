@@ -1,8 +1,14 @@
-use std::{sync::atomic::Ordering, time::Duration};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use crate::{
     playback::{Player, SeekMode, Sinks, VideoStream},
-    media::{Clip, Timeline},
+    project::{Clip, Timeline},
 };
 
 /// Plays a timeline
@@ -42,6 +48,12 @@ impl Engine {
     }
     pub fn is_playing(&self) -> bool {
         self.sinks.audio_playing.load(Ordering::Relaxed)
+    }
+
+    /// The flag the audio callback reads to decide whether to output. Handed out
+    /// so observers share it instead of keeping a copy that can drift.
+    pub fn playing_flag(&self) -> Arc<AtomicBool> {
+        self.sinks.audio_playing.clone()
     }
 
     pub fn position(&self) -> Duration {

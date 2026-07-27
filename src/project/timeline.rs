@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use crate::media::{Clip, Source, Track};
+use crate::media::Source;
+use crate::project::{Clip, Track};
 
 #[derive(Default)]
 pub struct Timeline {

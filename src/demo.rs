@@ -3,7 +3,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
 
-use crate::media::{Clip, Source, Timeline};
+use crate::media::Source;
+use crate::project::{Clip, Timeline};
 
 pub const SOURCES: &[&str] = &[];
 const N_CLIPS: usize = 400;

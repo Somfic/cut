@@ -1,5 +1,5 @@
 use crate::playback::{Decoder, SeekMode, Sinks, VideoStream};
-use crate::media::Clip;
+use crate::project::Clip;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;

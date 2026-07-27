@@ -32,7 +32,7 @@ impl Decoder {
         let pipeline = gst::parse::launch(
             "filesrc name=src ! decodebin name=dec \
             dec. ! queue ! appsink name=video max-buffers=1 drop=true \
-            dec. ! queue ! audioconvert ! audioresample ! audio/x-raw,format=F32LE,channels=2,rate=48000 ! appsink name=audio",
+            dec. ! queue ! audioconvert ! audioresample ! audio/x-raw,format=F32LE,layout=interleaved,channels=2,rate=48000 ! appsink name=audio",
         )
         .context("failed to parse pipeline")?
         .downcast::<gst::Pipeline>()

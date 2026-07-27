@@ -6,8 +6,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::clock::Clock;
-use crate::video::{Decoder, Frame, SeekMode, Source};
+use crate::media::{Frame, Source};
+use crate::playback::clock::Clock;
+use crate::playback::{Decoder, SeekMode};
 
 const CHANNELS: usize = 2;
 const RATE: usize = 48_000;

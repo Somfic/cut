@@ -1,10 +1,6 @@
 use std::sync::Arc;
 
-use crate::video::Source;
-
-mod widget;
-
-pub use widget::timeline;
+use crate::media::Source;
 
 #[derive(Default)]
 pub struct Timeline {

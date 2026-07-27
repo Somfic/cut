@@ -1,6 +1,6 @@
 use iced::{Rectangle, wgpu};
 
-use crate::video::{Frame, PixelLayout};
+use crate::media::{Frame, PixelLayout};
 
 pub struct FrameRenderer {
     pipeline: wgpu::RenderPipeline,

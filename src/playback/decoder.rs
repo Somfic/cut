@@ -1,4 +1,5 @@
-use crate::video::{AudioSink, Frame, Source};
+use crate::media::{Frame, Source};
+use crate::playback::AudioSink;
 use anyhow::{Context, anyhow};
 use gstreamer::prelude::*;
 use gstreamer::{self as gst, SeekFlags, State};

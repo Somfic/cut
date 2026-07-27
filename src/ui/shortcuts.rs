@@ -74,7 +74,6 @@ fn resolve(key: &Key, modifiers: Modifiers) -> Option<Action> {
 }
 
 pub fn subscription() -> Subscription<Action> {
-    // The closure has to stay non-capturing: iced rejects stateful ones here.
     keyboard::listen().filter_map(|event| match event {
         keyboard::Event::KeyPressed { key, modifiers, .. } => resolve(&key, modifiers),
         _ => None,

@@ -1,6 +1,10 @@
-use crate::video::Frame;
+use crate::media::Frame;
 use iced::{Rectangle, mouse, wgpu, widget::shader::Viewport};
 use std::sync::Arc;
+
+mod renderer;
+
+pub use renderer::FrameRenderer;
 
 pub struct VideoView {
     pub frame: Option<Arc<Frame>>,
@@ -12,7 +16,7 @@ pub struct FramePrimitive {
 }
 
 impl iced::widget::shader::Primitive for FramePrimitive {
-    type Pipeline = crate::video::FrameRenderer;
+    type Pipeline = FrameRenderer;
 
     fn prepare(
         &self,

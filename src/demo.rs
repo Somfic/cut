@@ -1,16 +1,47 @@
-//! Scaffolding for the demo project the app opens on launch. None of this is
-//! real editor behaviour — delete this module once projects can be loaded.
-
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub const SOURCES: &[&str] = &["/Users/lucas/Downloads/pizza.mp4"];
+use anyhow::anyhow;
 
-/// Lay this many clips of the one source, each this long, from random moments
-/// in the file.
-pub const N_CLIPS: usize = 400;
-pub const CLIP_SECS: f64 = 2.0;
+use crate::media::{Clip, Source, Timeline};
 
-/// Tiny xorshift PRNG — enough to scatter clip start points, no dependency.
+pub const SOURCES: &[&str] = &[];
+const N_CLIPS: usize = 400;
+const CLIP_SECS: f64 = 2.0;
+
+pub fn timeline() -> anyhow::Result<Timeline> {
+    let mut sources = Vec::new();
+    for path in SOURCES {
+        match Source::new(*path) {
+            Ok(source) => sources.push(Arc::new(source)),
+            Err(e) => eprintln!("could not open {path}: {e}"),
+        }
+    }
+    if sources.is_empty() {
+        return Err(anyhow!("no sources could be opened"));
+    }
+
+    let mut rng = Rng::seeded();
+    let mut clips = Vec::with_capacity(N_CLIPS);
+    let mut position = 0;
+
+    for i in 0..N_CLIPS {
+        let source = sources[i % sources.len()].clone();
+        let length = ((CLIP_SECS * source.fps).round() as usize).max(1);
+        let max_start = source.frame_count().saturating_sub(length);
+
+        clips.push(Clip {
+            source,
+            position,
+            source_start: rng.below(max_start),
+            length,
+        });
+        position += length;
+    }
+
+    Ok(Timeline::single_track(clips))
+}
+
 pub struct Rng(u64);
 
 impl Rng {
@@ -19,7 +50,7 @@ impl Rng {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(0x9E37_79B9_7F4A_7C15);
-        Rng(seed | 1) // xorshift needs nonzero state
+        Rng(seed | 1)
     }
 
     fn next_u64(&mut self) -> u64 {

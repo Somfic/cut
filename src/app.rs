@@ -9,7 +9,7 @@ use iced::{
 
 use crate::media::Frame;
 use crate::playback::{Command, SeekMode, worker};
-use crate::timeline::Timeline;
+use crate::media::Timeline;
 use crate::ui::shortcuts::{self, Action};
 use crate::ui::{VideoView, timeline::timeline};
 

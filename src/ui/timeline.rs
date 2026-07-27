@@ -1,7 +1,7 @@
 use iced::widget::canvas::{self, Frame, Geometry, Path, Stroke, Text};
 use iced::{Color, Element, Point, Rectangle, Renderer, Size, Theme, border, mouse, window};
 
-use crate::timeline::Timeline;
+use crate::media::Timeline;
 
 const RULER_HEIGHT: f32 = 22.0;
 const TRACK_HEIGHT: f32 = 54.0;

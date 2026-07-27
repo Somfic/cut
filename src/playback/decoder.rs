@@ -1,10 +1,10 @@
 use crate::media::{Frame, Source};
-use crate::playback::AudioSink;
+use crate::playback::{AudioSink, VideoSink, VideoStream};
 use anyhow::{Context, anyhow};
 use gstreamer::prelude::*;
 use gstreamer::{self as gst, SeekFlags, State};
 use gstreamer_app::{self as gst_app, AppSinkCallbacks};
-use iced::futures::channel::mpsc::{self, Receiver};
+use iced::futures::channel::mpsc::{self, Receiver, Sender};
 use ringbuf::traits::Producer;
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,8 +23,9 @@ pub struct Decoder {
 impl Decoder {
     pub fn for_source(
         source: Arc<Source>,
-        audio_out: AudioSink,
-    ) -> anyhow::Result<(Self, Receiver<Arc<Frame>>)> {
+        audio: AudioSink,
+        video: VideoSink,
+    ) -> anyhow::Result<Self> {
         let path_str = source
             .path
             .to_str()
@@ -51,30 +52,29 @@ impl Decoder {
             .downcast::<gst_app::AppSink>()
             .map_err(|_| anyhow!("'video' was not an AppSink"))?;
 
-        let (frame_sender, frame_receiver) = mpsc::channel::<Arc<Frame>>(4);
         video_sink.set_callbacks(
             AppSinkCallbacks::builder()
                 .new_sample({
-                    let mut frame_sender = frame_sender.clone();
+                    let mut video = video.clone();
                     move |sink| {
                         let sample = sink.pull_sample().map_err(|_| gst::FlowError::Eos)?;
-                        let frame: Frame = sample.try_into().map_err(|_| gst::FlowError::Error)?;
-                        match frame_sender.try_send(Arc::new(frame)) {
-                            Ok(()) => Ok(gst::FlowSuccess::Ok),
-                            Err(e) if e.is_full() => Ok(gst::FlowSuccess::Ok),
-                            Err(_) => Err(gst::FlowError::Eos),
+                        let frame = sample.try_into().map_err(|_| gst::FlowError::Error)?;
+                        if video.write(frame) {
+                            Ok(gst::FlowSuccess::Ok)
+                        } else {
+                            Err(gst::FlowError::Eos)
                         }
                     }
                 })
                 .new_preroll({
-                    let mut frame_sender = frame_sender.clone();
+                    let mut video = video.clone();
                     move |sink| {
                         let sample = sink.pull_preroll().map_err(|_| gst::FlowError::Eos)?;
-                        let frame: Frame = sample.try_into().map_err(|_| gst::FlowError::Error)?;
-                        match frame_sender.try_send(Arc::new(frame)) {
-                            Ok(()) => Ok(gst::FlowSuccess::Ok),
-                            Err(e) if e.is_full() => Ok(gst::FlowSuccess::Ok),
-                            Err(_) => Err(gst::FlowError::Eos),
+                        let frame = sample.try_into().map_err(|_| gst::FlowError::Error)?;
+                        if video.write(frame) {
+                            Ok(gst::FlowSuccess::Ok)
+                        } else {
+                            Err(gst::FlowError::Eos)
                         }
                     }
                 })
@@ -94,9 +94,7 @@ impl Decoder {
                     let buffer = sample.buffer().ok_or(gst::FlowError::Error)?;
                     let map = buffer.map_readable().map_err(|_| gst::FlowError::Error)?;
                     let samples: &[f32] = bytemuck::cast_slice(&map);
-                    if let Ok(mut prod) = audio_out.lock() {
-                        prod.push_slice(samples);
-                    }
+                    audio.write(samples);
                     Ok(gst::FlowSuccess::Ok)
                 })
                 .build(),
@@ -112,7 +110,7 @@ impl Decoder {
             .0
             .context("pipeline failed to preroll")?;
 
-        Ok((Self { source, pipeline }, frame_receiver))
+        Ok(Self { source, pipeline })
     }
 
     pub fn play(&self) {
@@ -130,7 +128,7 @@ impl Decoder {
     pub fn seek_to_frame(
         &self,
         frame: usize,
-        frames: &mut Receiver<Arc<Frame>>,
+        stream: &mut VideoStream,
         mode: SeekMode,
     ) -> Duration {
         let fps = if self.source.fps > 0.0 {
@@ -149,7 +147,7 @@ impl Decoder {
             .seek_simple(SeekFlags::FLUSH | seekflag, pos)
             .ok();
 
-        while let Ok(_) = frames.try_recv() {} // flush stale video
+        stream.drain();
 
         target
     }

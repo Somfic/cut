@@ -2,7 +2,6 @@ mod app;
 mod demo;
 mod media;
 mod playback;
-mod timeline;
 mod ui;
 
 use app::Screen;

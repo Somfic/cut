@@ -1,27 +1,10 @@
 use std::sync::Arc;
 
-use crate::media::Source;
+use crate::media::{Clip, Source, Track};
 
 #[derive(Default)]
 pub struct Timeline {
     pub tracks: Vec<Track>,
-}
-
-pub struct Track {
-    pub clips: Vec<Clip>,
-}
-
-pub struct Clip {
-    pub source: Arc<Source>,
-    pub position: usize,
-    pub source_start: usize,
-    pub length: usize,
-}
-
-impl Clip {
-    pub fn source_frame(&self, frame: usize) -> usize {
-        self.source_start + (frame - self.position)
-    }
 }
 
 impl Timeline {
@@ -64,11 +47,7 @@ impl Timeline {
             .unwrap_or(0)
     }
 
-    pub fn active_clips(&self, frame: usize) -> Vec<&Clip> {
-        self.tracks
-            .iter()
-            .flat_map(|t| &t.clips)
-            .filter(|c| c.position <= frame && frame < (c.position + c.length))
-            .collect()
+    pub fn clips_at(&self, frame: usize) -> Vec<&Clip> {
+        self.tracks.iter().flat_map(|t| t.clip_at(frame)).collect()
     }
 }

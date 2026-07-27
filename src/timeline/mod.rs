@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::video::Video;
+use crate::video::Source;
 
 mod widget;
 
@@ -16,7 +16,7 @@ pub struct Track {
 }
 
 pub struct Clip {
-    pub source: Arc<Video>,
+    pub source: Arc<Source>,
     pub position: usize,
     pub source_start: usize,
     pub length: usize,
@@ -29,16 +29,21 @@ impl Clip {
 }
 
 impl Timeline {
-    /// Each source in full, laid end to end on a single track.
-    pub fn sequence(sources: impl IntoIterator<Item = Arc<Video>>) -> Self {
+    pub fn single_track(clips: Vec<Clip>) -> Self {
+        Timeline {
+            tracks: vec![Track { clips }],
+        }
+    }
+
+    pub fn sequence(sources: impl IntoIterator<Item = Arc<Source>>) -> Self {
         let mut position = 0;
 
         let clips = sources
             .into_iter()
-            .map(|video| {
-                let length = video.frame_count().unwrap_or(0);
+            .map(|source| {
+                let length = source.frame_count();
                 let clip = Clip {
-                    source: video,
+                    source,
                     position,
                     source_start: 0,
                     length,
@@ -54,13 +59,6 @@ impl Timeline {
         }
     }
 
-    /// The source currently driving playback — source zero, the first clip
-    /// (see `video_worker`, which only plays that one for now).
-    pub fn playing_video(&self) -> Option<&Arc<Video>> {
-        self.tracks.first()?.clips.first().map(|clip| &clip.source)
-    }
-
-    /// Length in frames, i.e. where the last clip ends.
     pub fn length(&self) -> usize {
         self.tracks
             .iter()

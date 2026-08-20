@@ -3,13 +3,14 @@ use std::sync::Arc;
 use iced::widget::shader;
 use iced::{
     Element, Subscription,
-    widget::{button, column, container, row, text},
+    widget::{button, column, container, row, stack, text},
 };
 
 use crate::input::{self, Bindings};
 use crate::media::Frame;
 use crate::playback::{Controls, Request, SeekMode, transport};
 use crate::project::Timeline;
+use crate::rate::Rate;
 use crate::ui::{TimelineView, VideoView};
 
 const LAG_WARN_MS: i64 = 100;
@@ -20,6 +21,11 @@ pub struct App {
     frame: Option<Arc<Frame>>,
     controls: Option<Controls>,
     bindings: Bindings,
+    /// Redraws per second: counted in `view`, so it measures work the UI
+    /// actually did rather than what it was asked to do.
+    ui_rate: Rate,
+    /// Frames per second arriving from the transport.
+    video_rate: Rate,
 }
 
 #[derive(Clone)]
@@ -59,6 +65,15 @@ impl App {
     }
 
     pub fn view(&self) -> Element<'_, Event> {
+        // Counted here because `view` runs exactly once per redraw.
+        let counters = text(format!(
+            "ui {:.0} fps · video {:.0} fps",
+            self.ui_rate.tick(),
+            self.video_rate.hz()
+        ))
+        .size(11)
+        .color(iced::Color::from_rgb(0.6, 0.6, 0.6));
+
         let preview: Element<'_, Event> = match &self.frame {
             Some(frame) => shader(VideoView {
                 frame: Some(frame.clone()),
@@ -86,8 +101,20 @@ impl App {
             );
         }
 
+        // TODO: a toggle button for auto-following, so the view can be pinned
+        // while playing — `self.auto_follow && self.playing()`.
         let timeline = TimelineView::new(&self.timeline, self.playhead(), self.fps())
+            .follow_playhead(self.playing())
             .on_seek(|frame| Request::Seek((frame, SeekMode::Accurate)).into());
+
+        // Overlaid on the preview's top-left rather than taking a row, so the
+        // counters don't change the layout being measured.
+        let preview = stack![
+            preview,
+            container(counters)
+                .align_top(iced::Fill)
+                .align_left(iced::Fill)
+        ];
 
         column![preview, container(controls).center_x(iced::Fill), timeline,]
             .spacing(10)
@@ -99,7 +126,10 @@ impl App {
         match message {
             Event::Ready(controls) => self.controls = Some(controls),
             Event::Opened(timeline) => self.timeline = timeline,
-            Event::Frame(f) => self.frame = Some(f),
+            Event::Frame(f) => {
+                self.video_rate.tick();
+                self.frame = Some(f);
+            }
             Event::Request(request) => self.with_controls(|c| c.send(request)),
             Event::Keypress(key, modifiers) => {
                 for event in self.bindings.resolve(&key, modifiers) {

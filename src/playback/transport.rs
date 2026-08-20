@@ -8,8 +8,8 @@ use iced::futures::{FutureExt, SinkExt, StreamExt, select};
 
 use crate::app::Event;
 use crate::demo;
-use crate::project::Timeline;
 use crate::playback::{Controls, Engine, PlaybackState, Request, SeekMode, VideoStream};
+use crate::project::Timeline;
 
 const SEEK_TIMEOUT: Duration = Duration::from_millis(500);
 const PLAYBACK_STALL: Duration = Duration::from_secs(3);
@@ -124,7 +124,6 @@ pub fn transport() -> impl Stream<Item = Event> {
 
                     let timeline_frame = position + (source_frame - source_start);
                     playhead = timeline_frame;
-                    state.set_playhead(timeline_frame);
 
                     let target = frame.time;
                     let lag_ms = engine.position().as_secs_f64() * 1000.0
@@ -134,6 +133,12 @@ pub fn transport() -> impl Stream<Item = Event> {
                     if parked.is_none() && target > engine.position() {
                         Delay::new(target - engine.position()).await;
                     }
+
+                    // After the wait, not before: the playhead should describe
+                    // the picture being shown. Published early it runs up to a
+                    // frame ahead of the preview, and the UI — which samples it
+                    // at display rate — sees it step at odd moments.
+                    state.set_playhead(timeline_frame);
                     if output.send(Event::Frame(frame)).await.is_err() { break; }
                 }
                 // Watchdog: if no frame arrives for a while, the pipeline has

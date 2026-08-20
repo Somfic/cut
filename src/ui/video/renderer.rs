@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use iced::{Rectangle, wgpu};
 
 use crate::media::{Frame, PixelLayout};
@@ -8,6 +10,10 @@ pub struct FrameRenderer {
     bind_group_layout: wgpu::BindGroupLayout,
     uniform_buffer: wgpu::Buffer,
     texture: Option<FrameTexture>,
+    /// The frame currently in `texture`. Held (rather than compared by value)
+    /// so pointer equality is sound: while this `Arc` is alive, no other frame
+    /// can reuse its address.
+    uploaded: Option<Arc<Frame>>,
 }
 
 struct FrameTexture {
@@ -118,12 +124,25 @@ impl iced::widget::shader::Pipeline for FrameRenderer {
             bind_group_layout,
             uniform_buffer,
             texture: None,
+            uploaded: None,
         }
     }
 }
 
 impl FrameRenderer {
-    pub fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &Frame) {
+    pub fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &Arc<Frame>) {
+        // Redraws happen far more often than frames arrive — animations run at
+        // display rate, video at 24-30fps — and re-uploading planes for a
+        // picture that hasn't changed costs megabytes of bandwidth per redraw.
+        if self
+            .uploaded
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, frame))
+        {
+            return;
+        }
+        self.uploaded = Some(frame.clone());
+
         let size = (frame.width, frame.height);
 
         // The raw 16-bit P010 planes are uploaded reinterpreted as byte

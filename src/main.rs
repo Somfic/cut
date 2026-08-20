@@ -4,6 +4,7 @@ mod input;
 mod media;
 mod playback;
 mod project;
+mod rate;
 mod ui;
 
 use app::App;

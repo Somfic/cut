@@ -1,6 +1,8 @@
-/// View state owned by the canvas: viewport and drag tracking. The playhead
-/// itself lives in the app, since the video pipeline is the source of truth.
-#[derive(Debug)]
+use super::follow::Follow;
+
+/// View state owned by the canvas: the viewport, drag tracking, and how the
+/// view follows the playhead. The playhead itself lives in the app, since the
+/// video pipeline is the source of truth.
 pub struct State {
     /// Frame at the left edge of the widget.
     pub(super) scroll: f32,
@@ -13,15 +15,19 @@ pub struct State {
     /// know both the widget's width and the timeline's length, neither of
     /// which is available when the state is created.
     pub(super) fitted: bool,
+    pub(super) follow: Follow,
 }
 
 impl Default for State {
     fn default() -> Self {
         State {
             scroll: 0.0,
+            // Replaced by the fit-to-width on the first redraw; only has to be
+            // non-zero so nothing divides by it in the meantime.
             zoom: 2.0,
             scrubbing: None,
             fitted: false,
+            follow: Follow::default(),
         }
     }
 }

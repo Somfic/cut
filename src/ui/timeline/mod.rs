@@ -1,8 +1,9 @@
 //! The timeline widget: a canvas that draws the document and turns clicks and
 //! drags into seeks. Layout constants and event handling live here; painting is
-//! in `draw`, viewport state in `state`.
+//! in `draw`, viewport state in `state`, playhead chasing in `follow`.
 
 mod draw;
+mod follow;
 mod state;
 
 use iced::widget::canvas::{self, Frame, Geometry};
@@ -31,6 +32,7 @@ pub struct TimelineView<'a, Message> {
     timeline: &'a Timeline,
     playhead: usize,
     fps: f64,
+    follow_playhead: bool,
     on_seek: Option<Box<dyn Fn(usize) -> Message + 'a>>,
 }
 
@@ -40,8 +42,16 @@ impl<'a, Message: 'a> TimelineView<'a, Message> {
             timeline,
             playhead,
             fps: if fps > 0.0 { fps } else { 30.0 },
+            follow_playhead: false,
             on_seek: None,
         }
+    }
+
+    /// Whether the view should chase the playhead. The widget doesn't know what
+    /// playback is doing — the caller decides when following is wanted.
+    pub fn follow_playhead(mut self, follow: bool) -> Self {
+        self.follow_playhead = follow;
+        self
     }
 
     pub fn on_seek(mut self, f: impl Fn(usize) -> Message + 'a) -> Self {
@@ -84,19 +94,43 @@ impl<Message> canvas::Program<Message> for TimelineView<'_, Message> {
         let position = cursor.position_in(bounds);
 
         match event {
-            canvas::Event::Window(window::Event::RedrawRequested(_)) if !state.fitted => {
-                state.fitted = true;
+            canvas::Event::Window(window::Event::RedrawRequested(now)) => {
+                if !state.fitted {
+                    state.fitted = true;
 
-                let length = self.timeline.length();
-                if length > 0 && bounds.width > 0.0 {
-                    state.zoom = (bounds.width / length as f32).clamp(MIN_ZOOM, MAX_ZOOM);
+                    let length = self.timeline.length();
+                    if length > 0 && bounds.width > 0.0 {
+                        state.zoom = (bounds.width / length as f32).clamp(MIN_ZOOM, MAX_ZOOM);
+                    }
+
+                    return Some(canvas::Action::request_redraw());
                 }
 
-                Some(canvas::Action::request_redraw())
+                // Not following: a seek while paused moves the playhead, and
+                // the view should stay where the user left it.
+                if !self.follow_playhead {
+                    state.follow.release();
+                    return None;
+                }
+
+                state
+                    .follow
+                    .advance(
+                        self.playhead,
+                        &mut state.scroll,
+                        state.zoom,
+                        bounds.width,
+                        *now,
+                    )
+                    .then(canvas::Action::request_redraw)
             }
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let point = position?;
                 let frame = state.frame_at(point.x);
+
+                // Dragging the playhead is the pointer saying where to look, so
+                // the view shouldn't also be chasing it.
+                state.follow.release();
                 state.scrubbing = Some(frame);
                 self.seek(frame)
             }
@@ -112,6 +146,7 @@ impl<Message> canvas::Program<Message> for TimelineView<'_, Message> {
                     return Some(canvas::Action::capture());
                 }
 
+                state.follow.release();
                 state.scrubbing = Some(frame);
                 self.seek(frame)
             }
@@ -121,6 +156,10 @@ impl<Message> canvas::Program<Message> for TimelineView<'_, Message> {
             }
             canvas::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
                 let point = position?;
+
+                // Taking the view by hand stops the chase, and kills any glide
+                // still in flight so it doesn't fight the gesture.
+                state.follow.release();
 
                 let (dx, dy) = match delta {
                     mouse::ScrollDelta::Lines { x, y } => (x * 16.0, y * 16.0),

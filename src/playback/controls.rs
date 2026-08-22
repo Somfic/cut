@@ -1,4 +1,5 @@
 use crate::playback::SeekMode;
+use crate::project::Timeline;
 use iced::futures::channel::mpsc::Sender;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
@@ -6,6 +7,8 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 #[derive(Clone)]
 pub enum Request {
     TogglePlayback,
+    /// The document changed — play this one from now on.
+    Open(Arc<Timeline>),
     Step((i64, SeekMode)),
     Seek((usize, SeekMode)),
 }

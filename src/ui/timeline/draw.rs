@@ -1,10 +1,11 @@
 use iced::widget::canvas::{Frame, Path, Stroke, Text};
 use iced::{Color, Point, Rectangle, Size, Theme, border, mouse};
 
-use super::state::State;
+use super::state::{Drag, State};
 use super::{
-    CLIP_RADIUS, RULER_HEIGHT, TICK_MIN_SPACING, TICK_STEPS, TRACK_GAP, TRACK_HEIGHT, TimelineView,
+    CLIP_RADIUS, RULER_HEIGHT, TICK_MIN_SPACING, TICK_STEPS, TRACK_HEIGHT, TimelineView,
 };
+use crate::project::Edge;
 
 impl<Message> TimelineView<'_, Message> {
     pub(super) fn draw_tracks(
@@ -16,14 +17,27 @@ impl<Message> TimelineView<'_, Message> {
     ) {
         let palette = theme.extended_palette();
 
-        for (index, track) in self.timeline.tracks.iter().enumerate() {
-            let top = RULER_HEIGHT + index as f32 * (TRACK_HEIGHT + TRACK_GAP) + TRACK_GAP;
+        // One lane past the last, dimmer: somewhere to drop a clip to start a
+        // track, and a hint that dropping there does something.
+        for index in 0..=self.timeline.tracks.len() {
+            let top = state.top_of(index);
+            let empty = index == self.timeline.tracks.len();
 
             frame.fill_rectangle(
                 Point::new(0.0, top),
                 Size::new(bounds.width, TRACK_HEIGHT),
-                palette.background.weak.color,
+                match empty {
+                    true => Color {
+                        a: 0.4,
+                        ..palette.background.weak.color
+                    },
+                    false => palette.background.weak.color,
+                },
             );
+
+            let Some(track) = self.timeline.tracks.get(index) else {
+                continue;
+            };
 
             for clip in &track.clips {
                 let x = state.x_of(clip.position as f32);
@@ -40,12 +54,20 @@ impl<Message> TimelineView<'_, Message> {
                     border::Radius::from(CLIP_RADIUS),
                 );
 
+                let selected = self.selection == Some(clip.id);
+
                 frame.fill(&body, palette.primary.weak.color);
                 frame.stroke(
                     &body,
                     Stroke::default()
-                        .with_color(palette.primary.strong.color)
-                        .with_width(1.0),
+                        .with_color(match selected {
+                            true => palette.primary.base.color,
+                            false => palette.primary.strong.color,
+                        })
+                        .with_width(match selected {
+                            true => 2.5,
+                            false => 1.0,
+                        }),
                 );
 
                 let label = clip
@@ -73,6 +95,66 @@ impl<Message> TimelineView<'_, Message> {
                 }
             }
         }
+    }
+
+    /// What the gesture in flight would do, drawn over the document it has not
+    /// changed yet: where a carried clip would land, or where a trimmed end
+    /// would come to. Red when it could not land there at all.
+    pub(super) fn draw_drag(&self, frame: &mut Frame, state: &State, theme: &Theme) {
+        let palette = theme.extended_palette();
+
+        let (track, position, length, allowed) = match &state.drag {
+            Some(Drag::Move {
+                clip,
+                length,
+                track,
+                position,
+                ..
+            }) => (
+                *track,
+                *position,
+                *length,
+                self.timeline.has_room(*track, *position, *length, *clip),
+            ),
+            Some(Drag::Trim {
+                clip,
+                track,
+                edge,
+                frame: at,
+                anchor,
+            }) => {
+                let (position, end) = match edge {
+                    Edge::In => (*at, *anchor),
+                    Edge::Out => (*anchor, *at),
+                };
+                let length = end.saturating_sub(position);
+
+                (
+                    *track,
+                    position,
+                    length,
+                    self.timeline.has_room(*track, position, length, *clip),
+                )
+            }
+            _ => return,
+        };
+
+        let top = state.top_of(track);
+        let ghost = Path::rounded_rectangle(
+            Point::new(state.x_of(position as f32), top),
+            Size::new(length as f32 * state.zoom, TRACK_HEIGHT),
+            border::Radius::from(CLIP_RADIUS),
+        );
+        let colour = match allowed {
+            true => palette.primary.base.color,
+            false => palette.danger.base.color,
+        };
+
+        frame.fill(&ghost, Color { a: 0.25, ..colour });
+        frame.stroke(
+            &ghost,
+            Stroke::default().with_color(colour).with_width(2.0),
+        );
     }
 
     /// Ticks at an adaptive spacing: the coarsest step that still leaves at

@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::anyhow;
 
 use crate::media::Source;
-use crate::project::{Clip, Timeline};
+use crate::project::{Edit, Timeline};
 
 pub const SOURCES: &[&str] = &[
     "/Users/lucas/Downloads/pizza.mp4",
@@ -27,24 +27,26 @@ pub fn timeline() -> anyhow::Result<Timeline> {
     }
 
     let mut rng = Rng::seeded();
-    let mut clips = Vec::with_capacity(N_CLIPS);
+    let mut timeline = Timeline::default();
     let mut position = 0;
 
     for i in 0..N_CLIPS {
         let source = sources[i % sources.len()].clone();
-        let length = ((CLIP_SECS * source.fps).round() as usize).max(1);
+        let length = ((CLIP_SECS * source.fps()).round() as usize).max(1);
         let max_start = source.frame_count().saturating_sub(length);
 
-        clips.push(Clip {
+        timeline.apply(Edit::Place {
+            track: 0,
             source,
             position,
             source_start: rng.below(max_start),
             length,
-        });
+        })?;
+
         position += length;
     }
 
-    Ok(Timeline::single_track(clips))
+    Ok(timeline)
 }
 
 pub struct Rng(u64);

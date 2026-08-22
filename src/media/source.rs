@@ -1,6 +1,6 @@
 use anyhow::{Context, anyhow};
 use gstreamer::prelude::*;
-use gstreamer::{self as gst, State};
+use gstreamer::{self as gst, Fraction, State};
 use gstreamer_app::{self as gst_app};
 use gstreamer_video::VideoInfo;
 use std::path::{Path, PathBuf};
@@ -9,26 +9,33 @@ use std::time::Duration;
 pub struct Source {
     pub path: PathBuf,
     pub duration: Duration,
-    pub fps: f64,
+    /// Kept as the rational the file declares rather than a divided-out float:
+    /// everything a timeline stores is a frame index, so this is what gives
+    /// those indices a meaning in time — and 29.97 fps is 30000/1001.
+    pub frame_rate: Fraction,
 }
 
 impl Source {
     pub fn new(path: impl Into<PathBuf>) -> anyhow::Result<Self> {
         let path = path.into();
-        let (duration, fps) = probe(&path)?;
+        let (duration, frame_rate) = probe(&path)?;
         Ok(Self {
             path,
             duration,
-            fps,
+            frame_rate,
         })
     }
 
+    pub fn fps(&self) -> f64 {
+        self.frame_rate.numer() as f64 / self.frame_rate.denom() as f64
+    }
+
     pub fn frame_count(&self) -> usize {
-        (self.duration.as_secs_f64() * self.fps).round() as usize
+        (self.duration.as_secs_f64() * self.fps()).round() as usize
     }
 }
 
-fn probe(path: &Path) -> anyhow::Result<(Duration, f64)> {
+fn probe(path: &Path) -> anyhow::Result<(Duration, Fraction)> {
     let path_str = path
         .to_str()
         .ok_or_else(|| anyhow!("path is not valid UTF-8: {}", path.display()))?;
@@ -66,18 +73,15 @@ fn probe(path: &Path) -> anyhow::Result<(Duration, f64)> {
         .map(|t| Duration::from_nanos(t.nseconds()))
         .unwrap_or_default();
 
-    let fps = vsink
+    let frame_rate = vsink
         .static_pad("sink")
         .and_then(|pad| pad.current_caps())
         .and_then(|caps| VideoInfo::from_caps(&caps).ok())
-        .map(|info| {
-            let f = info.fps();
-            f.numer() as f64 / f.denom() as f64
-        })
-        .filter(|f| *f > 0.0)
-        .unwrap_or(30.0);
+        .map(|info| info.fps())
+        .filter(|fps| fps.numer() > 0 && fps.denom() > 0)
+        .unwrap_or_else(|| Fraction::new(30, 1));
 
     let _ = pipeline.set_state(State::Null);
 
-    Ok((duration, fps))
+    Ok((duration, frame_rate))
 }

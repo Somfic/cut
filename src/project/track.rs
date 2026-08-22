@@ -1,5 +1,6 @@
 use crate::project::Clip;
 
+#[derive(Clone)]
 pub struct Track {
     pub clips: Vec<Clip>,
 }

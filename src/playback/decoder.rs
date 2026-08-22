@@ -122,7 +122,7 @@ impl Decoder {
     }
 
     pub fn fps(&self) -> f64 {
-        self.source.fps
+        self.source.fps()
     }
 
     pub fn seek_to_frame(
@@ -131,8 +131,8 @@ impl Decoder {
         stream: &mut VideoStream,
         mode: SeekMode,
     ) -> Duration {
-        let fps = if self.source.fps > 0.0 {
-            self.source.fps
+        let fps = if self.source.fps() > 0.0 {
+            self.source.fps()
         } else {
             30.0
         };

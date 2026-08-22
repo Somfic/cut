@@ -1,7 +1,21 @@
 use crate::app::Event;
 use crate::playback::{Request, SeekMode};
 use iced::keyboard::{self, Key as RawKey, Modifiers, key::Named as Key};
-use iced::{Subscription, mouse};
+use iced::{Subscription, mouse, window};
+
+/// Files dragged onto the window.
+///
+/// winit reports no cursor position with a drop, so where the pointer was is
+/// not something we can honour — the app picks the target itself. Wayland does
+/// not report drops at all, so this is quiet there and the menu is the way in.
+pub fn file_drops() -> Subscription<Event> {
+    iced::window::events().filter_map(|(_, event)| match event {
+        window::Event::FileHovered(_) => Some(Event::DragOver(true)),
+        window::Event::FilesHoveredLeft => Some(Event::DragOver(false)),
+        window::Event::FileDropped(path) => Some(Event::Dropped(path)),
+        _ => None,
+    })
+}
 
 pub fn keylogger() -> Subscription<Event> {
     keyboard::listen().filter_map(|event| match event {
@@ -26,6 +40,14 @@ impl Default for Bindings {
             Binding::new(Key::ArrowRight, Request::Step((10, SeekMode::Accurate)))
                 .with_modifiers(Modifiers::SHIFT),
             Binding::new(Key::Home, Request::Seek((0, SeekMode::Accurate))),
+            Binding::new(Key::Escape, Event::Menu(None)),
+            // COMMAND is Cmd on the Mac and Ctrl everywhere else, so one binding
+            // is the native one on both machines.
+            Binding::new("z", Event::Undo).with_modifiers(Modifiers::COMMAND),
+            Binding::new("z", Event::Redo).with_modifiers(Modifiers::COMMAND | Modifiers::SHIFT),
+            Binding::new(Key::Delete, Event::DeleteSelection),
+            Binding::new(Key::Backspace, Event::DeleteSelection),
+            Binding::new("s", Event::SplitSelection),
         ])
     }
 }

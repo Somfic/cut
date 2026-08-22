@@ -1,6 +1,8 @@
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use anyhow::Context;
 use futures_timer::Delay;
 use iced::futures::Stream;
 use iced::futures::channel::mpsc::{self, Sender};
@@ -9,7 +11,7 @@ use iced::futures::{FutureExt, SinkExt, StreamExt, select};
 use crate::app::Event;
 use crate::demo;
 use crate::playback::{Controls, Engine, PlaybackState, Request, SeekMode, VideoStream};
-use crate::project::Timeline;
+use crate::project::{Timeline, file};
 
 const SEEK_TIMEOUT: Duration = Duration::from_millis(500);
 const PLAYBACK_STALL: Duration = Duration::from_secs(3);
@@ -28,8 +30,28 @@ fn cut(
     }
 }
 
-pub fn transport() -> impl Stream<Item = Event> {
-    iced::stream::channel(64, async |mut output: Sender<Event>| {
+/// Read the project file, falling back to the demo timeline when nothing is
+/// there yet — saving over that fallback is how the first project gets written.
+fn open(project: &Path) -> anyhow::Result<(Timeline, bool)> {
+    if project.exists() {
+        let timeline = file::load(project)
+            .with_context(|| format!("could not open {}", project.display()))?;
+
+        Ok((timeline, true))
+    } else {
+        let timeline = demo::timeline().context("could not build the demo timeline")?;
+
+        Ok((timeline, false))
+    }
+}
+
+// `use<>`: the returned stream owns a clone of the path and captures nothing
+// from the borrow, which is what lets this be the plain `fn(&D) -> S` pointer
+// `Subscription::run_with` wants.
+pub fn transport(project: &PathBuf) -> impl Stream<Item = Event> + use<> {
+    let project = project.clone();
+
+    iced::stream::channel(64, async move |mut output: Sender<Event>| {
         let (command_tx, mut command_rx) = mpsc::channel::<Request>(16);
         let (mut engine, mut stream) = Engine::new();
 
@@ -38,19 +60,26 @@ pub fn transport() -> impl Stream<Item = Event> {
         let controls = Controls::new(command_tx, state.clone());
         output.send(Event::Ready(controls)).await.ok();
 
-        let timeline = match demo::timeline() {
-            Ok(timeline) => Arc::new(timeline),
+        let (mut timeline, on_disk) = match open(&project) {
+            Ok((timeline, on_disk)) => (Arc::new(timeline), on_disk),
             Err(e) => {
-                eprintln!("could not build the demo timeline: {e}");
+                eprintln!("{e:#}");
                 return;
             }
         };
-        output.send(Event::Opened(timeline.clone())).await.ok();
+        output
+            .send(Event::Opened {
+                timeline: timeline.clone(),
+                on_disk,
+            })
+            .await
+            .ok();
 
-        let length = timeline.length();
+        let mut length = timeline.length();
         if length == 0 {
-            eprintln!("timeline is empty");
-            return;
+            // Not fatal: an empty document is what importing into a new
+            // project starts from.
+            eprintln!("timeline is empty — import some media");
         }
 
         // Accurate: the seek's segment starts exactly at the in-point, so
@@ -78,11 +107,24 @@ pub fn transport() -> impl Stream<Item = Event> {
             select! {
                 cmd = command_rx.select_next_some() => match cmd {
                     Request::TogglePlayback => engine.toggle(),
+                    Request::Open(opened) => {
+                        timeline = opened;
+                        length = timeline.length();
+                        // Stay where the playhead was if the new document
+                        // still reaches that far — an import appends, so it
+                        // usually does.
+                        parked = Some((
+                            playhead.min(length.saturating_sub(1)),
+                            SeekMode::Accurate,
+                        ));
+                    }
                     // Relative seeks resolve against the last playhead and then
                     // park, so every seek takes the same route through `cut`.
                     Request::Step((delta, mode)) => {
                         parked = Some((
-                            playhead.saturating_add_signed(delta as isize).min(length - 1),
+                            playhead
+                                .saturating_add_signed(delta as isize)
+                                .min(length.saturating_sub(1)),
                             mode,
                         ));
                     }
@@ -95,7 +137,7 @@ pub fn transport() -> impl Stream<Item = Event> {
                     // times are in that clip's own source, not the timeline's.
                     let Some((position, source_start, clip_len, fps)) = engine
                         .live_clip(0)
-                        .map(|c| (c.position, c.source_start, c.length, c.source.fps))
+                        .map(|c| (c.position, c.source_start, c.length, c.source.fps()))
                     else {
                         continue;
                     };
@@ -116,7 +158,10 @@ pub fn transport() -> impl Stream<Item = Event> {
                     // at the end of the timeline). Timeline arithmetic, so the
                     // worker never has to know about clip indices.
                     if source_frame >= source_start + clip_len {
-                        let next = (position + clip_len) % length;
+                        // Not simply the next frame along: a move or a delete
+                        // can leave a hole with nothing in it to decode, and
+                        // `next_content` wraps at the end of the document.
+                        let next = timeline.next_content(position + clip_len).unwrap_or(0);
                         cut(&mut engine, &timeline, next, &mut stream, SeekMode::Accurate);
                         in_flight = Some(Instant::now());
                         continue;
@@ -149,7 +194,7 @@ pub fn transport() -> impl Stream<Item = Event> {
                 _ = Delay::new(PLAYBACK_STALL).fuse() => {
                     let next = engine
                         .live_clip(0)
-                        .map(|c| (c.position + c.length) % length)
+                        .and_then(|c| timeline.next_content(c.position + c.length))
                         .unwrap_or(0);
                     cut(&mut engine, &timeline, next, &mut stream, SeekMode::Fast);
                     in_flight = Some(Instant::now());

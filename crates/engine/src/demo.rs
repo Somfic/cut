@@ -7,9 +7,7 @@ use crate::media::Source;
 use crate::project::{Edit, Timeline};
 
 pub const SOURCES: &[&str] = &[
-    "/Users/lucas/Downloads/pizza.mp4",
-    "/Users/lucas/Downloads/surfer.mp4",
-    "/Users/lucas/Downloads/muscle.mp4",
+    "/Users/lucas/Downloads/trailer.webm",
 ];
 const N_CLIPS: usize = 400;
 const CLIP_SECS: f64 = 2.0;

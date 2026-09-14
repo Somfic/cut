@@ -1,5 +1,5 @@
 use anyhow::{Context, anyhow};
-use gstreamer::{BufferRef, Fraction, Sample};
+use gstreamer::{Fraction, Sample};
 use gstreamer_video as gst_video;
 use gstreamer_video::VideoFormat;
 use gstreamer_video::prelude::*;
@@ -14,16 +14,54 @@ pub enum PixelLayout {
     P010,
 }
 
+/// A decoded picture, still in the buffer gstreamer decoded it into.
+///
+/// The planes are not copied out and not repacked. Decoders write rows padded
+/// to a stride of their choosing, and the obvious way to deal with that is to
+/// tighten them up into a `Vec` — but a texture upload takes a row stride, so
+/// nothing has to be moved. Skipping that pass is worth 3 MB of copying and a
+/// 3 MB allocation per frame at 1080p, and four times that at 4K.
 pub struct Frame {
     pub width: u32,
     pub height: u32,
     pub fps: Fraction,
     pub time: Duration,
     pub layout: PixelLayout,
-    /// Raw luma plane, tightly packed (no row padding).
-    pub y: Vec<u8>,
-    /// Raw interleaved chroma plane, tightly packed.
-    pub uv: Vec<u8>,
+    /// The mapped buffer. Holding it is what keeps the plane slices valid.
+    mapped: gst_video::VideoFrame<gst_video::video_frame::Readable>,
+}
+
+impl Frame {
+    /// The luma plane, and the byte offset between its rows.
+    ///
+    /// The slice spans whole rows including whatever padding the decoder left
+    /// on the end of each, so it must be read with `y_stride`, not `width`.
+    pub fn y(&self) -> &[u8] {
+        self.plane(0)
+    }
+
+    pub fn y_stride(&self) -> u32 {
+        self.stride(0)
+    }
+
+    /// The interleaved chroma plane (Cb,Cr pairs), and its row stride.
+    pub fn uv(&self) -> &[u8] {
+        self.plane(1)
+    }
+
+    pub fn uv_stride(&self) -> u32 {
+        self.stride(1)
+    }
+
+    fn plane(&self, index: u32) -> &[u8] {
+        self.mapped
+            .plane_data(index)
+            .expect("plane index checked when the frame was built")
+    }
+
+    fn stride(&self, index: usize) -> u32 {
+        self.mapped.plane_stride()[index] as u32
+    }
 }
 
 impl TryFrom<Sample> for Frame {
@@ -32,58 +70,39 @@ impl TryFrom<Sample> for Frame {
     fn try_from(sample: Sample) -> Result<Frame, Self::Error> {
         let caps = sample.caps().context("sample had no caps")?;
         let info = gst_video::VideoInfo::from_caps(caps).context("caps were not video/x-raw")?;
-        let width = info.width();
-        let height = info.height();
 
-        let buffer = sample.buffer().context("sample had no buffer")?;
-        let frame = gst_video::VideoFrameRef::from_buffer_ref_readable(buffer, &info)
-            .map_err(|_| anyhow!("failed to map buffer as readable video frame"))?;
-
-        let time = buffer.pts().map(Duration::from).unwrap_or_default();
-
-        let (layout, bytes_per_sample) = match info.format() {
-            VideoFormat::Nv12 => (PixelLayout::Nv12, 1usize),
-            VideoFormat::P01010le => (PixelLayout::P010, 2usize),
+        let layout = match info.format() {
+            VideoFormat::Nv12 => PixelLayout::Nv12,
+            VideoFormat::P01010le => PixelLayout::P010,
             other => return Err(anyhow!("unsupported pixel format: {other:?}")),
         };
 
-        let w = width as usize;
-        let h = height as usize;
-        // Both planes are `width` samples wide (chroma = width/2 Cb,Cr pairs);
-        // luma spans all rows, chroma spans half.
-        let row_bytes = w * bytes_per_sample;
-        let y = pack_plane(&frame, 0, row_bytes, h)?;
-        let uv = pack_plane(&frame, 1, row_bytes, h / 2)?;
+        // Owned rather than borrowed: the mapping outlives this call, which is
+        // what lets the planes be uploaded later without being copied first.
+        let buffer = sample
+            .buffer_owned()
+            .context("sample had no buffer")?;
+        let time = buffer.pts().map(Duration::from).unwrap_or_default();
+
+        let mapped = gst_video::VideoFrame::from_buffer_readable(buffer, &info)
+            .map_err(|_| anyhow!("failed to map buffer as a readable video frame"))?;
+
+        // Both planes are read below, so fail here rather than at upload time.
+        for plane in 0..2 {
+            mapped
+                .plane_data(plane)
+                .map_err(|_| anyhow!("frame has no plane {plane}"))?;
+        }
 
         Ok(Frame {
-            width,
-            height,
+            width: info.width(),
+            height: info.height(),
             time,
             fps: info.fps(),
             layout,
-            y,
-            uv,
+            mapped,
         })
     }
-}
-
-fn pack_plane(
-    frame: &gst_video::VideoFrameRef<&BufferRef>,
-    idx: u32,
-    row_bytes: usize,
-    rows: usize,
-) -> anyhow::Result<Vec<u8>> {
-    let src = frame
-        .plane_data(idx)
-        .map_err(|_| anyhow!("no plane {idx}"))?;
-    let src_stride = frame.plane_stride()[idx as usize] as usize;
-    let mut out = vec![0u8; row_bytes * rows];
-    for row in 0..rows {
-        let s = row * src_stride;
-        let d = row * row_bytes;
-        out[d..d + row_bytes].copy_from_slice(&src[s..s + row_bytes]);
-    }
-    Ok(out)
 }
 
 impl Debug for Frame {

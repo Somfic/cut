@@ -1,3 +1,6 @@
 /target
 /.direnv
 /project.cut
+
+# tauri codegen output
+crates/spike/gen/

@@ -1,0 +1,10 @@
+[package]
+name = "cut-render"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cut-engine = { path = "../engine" }
+# Must resolve to the same wgpu iced links against, so the `Device` and
+# `Queue` the front end hands in are the same types this was built for.
+wgpu = "27"

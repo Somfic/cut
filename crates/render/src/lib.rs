@@ -1,6 +1,11 @@
-use std::sync::Arc;
+//! Putting a decoded [`Frame`] on the screen.
+//!
+//! Split out from any one front end because the upload path is the part that
+//! has to stay fast: the planes go to the GPU untouched and the shader does
+//! the YUV conversion, so whatever is driving the window — iced, a webview
+//! overlay — gets the same picture at the same cost.
 
-use iced::{Rectangle, wgpu};
+use std::sync::Arc;
 
 use cut_engine::media::{Frame, PixelLayout};
 
@@ -24,8 +29,9 @@ struct FrameTexture {
     layout: PixelLayout,
 }
 
-impl iced::widget::shader::Pipeline for FrameRenderer {
-    fn new(device: &wgpu::Device, _queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
+impl FrameRenderer {
+    /// `format` is the surface format the frame will be drawn into.
+    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("video shader"),
             source: wgpu::ShaderSource::Wgsl(SHADER_WGSL.into()),
@@ -155,10 +161,6 @@ impl FrameRenderer {
             ),
             PixelLayout::Nv12 => (wgpu::TextureFormat::R8Unorm, wgpu::TextureFormat::Rg8Unorm),
         };
-        // Bytes per source row = frame width × bytes-per-sample (1 for NV12,
-        // 2 for P010). The luma plane is `width` samples; the chroma plane is
-        // also `width` samples (width/2 Cb,Cr pairs), so both share this.
-        let row_bytes = frame.y.len() as u32 / frame.height;
 
         let stale = self.texture.as_ref().map(|t| (t.size, t.layout)) != Some((size, frame.layout));
         if stale {
@@ -237,10 +239,14 @@ impl FrameRenderer {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            &frame.y,
+            frame.y(),
+            // The decoder's own stride, so its padded rows are uploaded where
+            // they lie rather than being packed down first. `write_texture`
+            // puts no alignment requirement on this — unlike a buffer copy,
+            // which would need a multiple of 256.
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(row_bytes),
+                bytes_per_row: Some(frame.y_stride()),
                 rows_per_image: Some(frame.height),
             },
             wgpu::Extent3d {
@@ -256,10 +262,10 @@ impl FrameRenderer {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            &frame.uv,
+            frame.uv(),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(row_bytes),
+                bytes_per_row: Some(frame.uv_stride()),
                 rows_per_image: Some(frame.height / 2),
             },
             wgpu::Extent3d {
@@ -270,11 +276,20 @@ impl FrameRenderer {
         );
     }
 
-    pub fn update_uniforms(&self, queue: &wgpu::Queue, bounds: &Rectangle, vw: u32, vh: u32) {
-        if bounds.height <= 0.0 || vh == 0 {
+    /// The dimensions of the frame currently on the GPU, if there is one.
+    ///
+    /// A caller that uploads and presents from different threads needs this:
+    /// by the time it draws, it no longer has the `Frame` to ask.
+    pub fn uploaded_size(&self) -> Option<(u32, u32)> {
+        self.texture.as_ref().map(|texture| texture.size)
+    }
+
+    /// Letterbox the video into a `width` x `height` target area.
+    pub fn update_uniforms(&self, queue: &wgpu::Queue, width: f32, height: f32, vw: u32, vh: u32) {
+        if height <= 0.0 || vh == 0 {
             return; // not laid out yet; avoid NaN
         }
-        let widget_aspect = bounds.width / bounds.height;
+        let widget_aspect = width / height;
         let video_aspect = vw as f32 / vh as f32;
         let (sx, sy) = if widget_aspect > video_aspect {
             (video_aspect / widget_aspect, 1.0)

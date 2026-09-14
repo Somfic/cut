@@ -5,7 +5,7 @@ use super::state::{Drag, State};
 use super::{
     CLIP_RADIUS, RULER_HEIGHT, TICK_MIN_SPACING, TICK_STEPS, TRACK_HEIGHT, TimelineView,
 };
-use crate::project::Edge;
+use cut_engine::project::Edge;
 
 impl<Message> TimelineView<'_, Message> {
     pub(super) fn draw_tracks(

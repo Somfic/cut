@@ -12,4 +12,4 @@ pub use decoder::{Decoder, SeekMode};
 pub use engine::Engine;
 pub use player::Player;
 pub use sinks::{AudioSink, Sinks, VideoSink, VideoStream};
-pub use transport::transport;
+pub use transport::{Event, transport};

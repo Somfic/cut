@@ -15,7 +15,7 @@ mod state;
 use iced::widget::canvas::{self, Frame, Geometry};
 use iced::{Element, Point, Rectangle, Renderer, Theme, mouse, window};
 
-use crate::project::{Clip, ClipId, Edge, Edit, Timeline};
+use cut_engine::project::{Clip, ClipId, Edge, Edit, Timeline};
 use state::{Drag, State};
 
 const RULER_HEIGHT: f32 = 22.0;
@@ -573,10 +573,10 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use gstreamer::Fraction;
+
 
     use super::*;
-    use crate::media::Source;
+    use cut_engine::media::{Fraction, Source};
 
     /// A source of `seconds` at 30 fps, stated rather than probed.
     fn source(seconds: u64) -> Arc<Source> {

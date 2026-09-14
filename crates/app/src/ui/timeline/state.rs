@@ -1,6 +1,6 @@
 use super::follow::Follow;
 use super::{RULER_HEIGHT, TRACK_GAP, TRACK_HEIGHT};
-use crate::project::{ClipId, Edge};
+use cut_engine::project::{ClipId, Edge};
 
 /// What the pointer is in the middle of doing, between press and release.
 ///

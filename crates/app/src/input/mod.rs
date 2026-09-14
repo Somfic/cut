@@ -1,7 +1,7 @@
 use crate::app::Event;
-use crate::playback::{Request, SeekMode};
+use cut_engine::playback::{Request, SeekMode};
 use iced::keyboard::{self, Key as RawKey, Modifiers, key::Named as Key};
-use iced::{Subscription, mouse, window};
+use iced::{Subscription, window};
 
 /// Files dragged onto the window.
 ///

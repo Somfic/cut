@@ -1,6 +1,6 @@
 use crate::playback::SeekMode;
 use crate::project::Timeline;
-use iced::futures::channel::mpsc::Sender;
+use futures::channel::mpsc::Sender;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 

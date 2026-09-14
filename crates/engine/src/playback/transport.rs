@@ -3,15 +3,32 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
+use futures::channel::mpsc::{self, Sender};
+use futures::{FutureExt, SinkExt, Stream, StreamExt, select};
 use futures_timer::Delay;
-use iced::futures::Stream;
-use iced::futures::channel::mpsc::{self, Sender};
-use iced::futures::{FutureExt, SinkExt, StreamExt, select};
 
-use crate::app::Event;
 use crate::demo;
+use crate::media::Frame;
 use crate::playback::{Controls, Engine, PlaybackState, Request, SeekMode, VideoStream};
 use crate::project::{Timeline, file};
+use crate::stream;
+
+/// Everything the transport tells a front end about. Deliberately small: a
+/// front end renders these three things and drives the rest through
+/// [`Controls`], so it needs no view into the engine's internals.
+#[derive(Clone)]
+pub enum Event {
+    /// The handle for driving playback. Arrives once, first.
+    Ready(Controls),
+    Opened {
+        timeline: Arc<Timeline>,
+        /// False when this came from the demo fallback instead of the project
+        /// file, which is what makes autosave write it out and gives the
+        /// project a file to begin with.
+        on_disk: bool,
+    },
+    Frame(Arc<Frame>),
+}
 
 const SEEK_TIMEOUT: Duration = Duration::from_millis(500);
 const PLAYBACK_STALL: Duration = Duration::from_secs(3);
@@ -51,7 +68,7 @@ fn open(project: &Path) -> anyhow::Result<(Timeline, bool)> {
 pub fn transport(project: &PathBuf) -> impl Stream<Item = Event> + use<> {
     let project = project.clone();
 
-    iced::stream::channel(64, async move |mut output: Sender<Event>| {
+    stream::channel(64, async move |mut output: Sender<Event>| {
         let (command_tx, mut command_rx) = mpsc::channel::<Request>(16);
         let (mut engine, mut stream) = Engine::new();
 

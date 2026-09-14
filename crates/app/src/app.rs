@@ -2,19 +2,21 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::channel::mpsc::Sender;
+use futures::{SinkExt, Stream, StreamExt};
 use futures_timer::Delay;
-use iced::futures::channel::mpsc::Sender;
-use iced::futures::{SinkExt, Stream};
 use iced::widget::shader;
 use iced::{
     Element, Subscription, Task,
     widget::{button, column, container, mouse_area, row, stack, text},
 };
 
+use cut_engine::media::{Frame, Source};
+use cut_engine::playback::{self, Controls, Request, SeekMode};
+use cut_engine::project::{ClipId, Edit, History, Timeline, file};
+use cut_engine::stream;
+
 use crate::input::{self, Bindings};
-use crate::media::{Frame, Source};
-use crate::playback::{Controls, Request, SeekMode, transport};
-use crate::project::{ClipId, Edit, History, Timeline, file};
 use crate::rate::Rate;
 use crate::ui::{Menu, MenuBar, TimelineView, VideoView};
 
@@ -105,6 +107,26 @@ impl From<Request> for Event {
     fn from(request: Request) -> Self {
         Event::Request(request)
     }
+}
+
+impl From<playback::Event> for Event {
+    fn from(event: playback::Event) -> Self {
+        match event {
+            playback::Event::Ready(controls) => Event::Ready(controls),
+            playback::Event::Opened { timeline, on_disk } => {
+                Event::Opened { timeline, on_disk }
+            }
+            playback::Event::Frame(frame) => Event::Frame(frame),
+        }
+    }
+}
+
+/// The engine's transport, as the messages this front end speaks.
+///
+/// `use<>`: like the engine's own, this captures nothing from the borrow, so
+/// it stays the plain `fn(&D) -> S` pointer `Subscription::run_with` wants.
+fn transport(project: &PathBuf) -> impl Stream<Item = Event> + use<> {
+    playback::transport(project).map(Event::from)
 }
 
 impl App {
@@ -412,7 +434,7 @@ impl App {
 /// with `iced::time::every`, which would pull in an async-runtime feature
 /// nothing else here needs.
 fn autosave_ticks() -> impl Stream<Item = Event> {
-    iced::stream::channel(1, async |mut output: Sender<Event>| {
+    stream::channel(1, async |mut output: Sender<Event>| {
         loop {
             Delay::new(AUTOSAVE_INTERVAL).await;
 

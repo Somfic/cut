@@ -1,9 +1,5 @@
 mod app;
-mod demo;
 mod input;
-mod media;
-mod playback;
-mod project;
 mod rate;
 mod ui;
 
@@ -15,7 +11,7 @@ use app::App;
 const DEFAULT_PROJECT: &str = "project.cut";
 
 fn main() -> anyhow::Result<()> {
-    gstreamer::init()?;
+    cut_engine::init()?;
 
     // `cut [path]`. The file does not have to exist yet: without one the demo
     // timeline comes up, and saving writes the first project there.

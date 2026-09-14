@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use iced::{Rectangle, wgpu};
 
-use crate::media::{Frame, PixelLayout};
+use cut_engine::media::{Frame, PixelLayout};
 
 pub struct FrameRenderer {
     pipeline: wgpu::RenderPipeline,

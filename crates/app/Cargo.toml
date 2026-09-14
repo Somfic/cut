@@ -1,0 +1,16 @@
+[package]
+name = "cut"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "cut"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+cut-engine = { path = "../engine" }
+futures = { workspace = true }
+futures-timer = { workspace = true }
+iced = { version = "0.14.0", features = ["wgpu", "canvas"] }
+rfd = "0.17.2"

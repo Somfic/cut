@@ -1,4 +1,4 @@
-use crate::media::Frame;
+use cut_engine::media::Frame;
 use iced::{Rectangle, mouse, wgpu, widget::shader::Viewport};
 use std::sync::Arc;
 

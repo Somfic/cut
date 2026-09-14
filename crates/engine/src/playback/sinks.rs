@@ -1,8 +1,8 @@
 use crate::{media::Frame, playback::Clock};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use iced::futures::Stream;
-use iced::futures::channel::mpsc::{self, Receiver, Sender};
-use iced::futures::stream::FusedStream;
+use futures::Stream;
+use futures::channel::mpsc::{self, Receiver, Sender};
+use futures::stream::FusedStream;
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::{HeapProd, HeapRb};
 use std::pin::Pin;

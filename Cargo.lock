@@ -711,14 +711,25 @@ name = "cut"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cut-engine",
+ "futures",
+ "futures-timer",
+ "iced",
+ "rfd",
+]
+
+[[package]]
+name = "cut-engine"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
  "bytemuck",
  "cpal",
+ "futures",
  "futures-timer",
  "gstreamer",
  "gstreamer-app",
  "gstreamer-video",
- "iced",
- "rfd",
  "ringbuf",
  "serde",
  "serde_json",

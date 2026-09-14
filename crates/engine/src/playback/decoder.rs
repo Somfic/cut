@@ -1,11 +1,9 @@
-use crate::media::{Frame, Source};
+use crate::media::Source;
 use crate::playback::{AudioSink, VideoSink, VideoStream};
 use anyhow::{Context, anyhow};
 use gstreamer::prelude::*;
 use gstreamer::{self as gst, SeekFlags, State};
 use gstreamer_app::{self as gst_app, AppSinkCallbacks};
-use iced::futures::channel::mpsc::{self, Receiver, Sender};
-use ringbuf::traits::Producer;
 use std::sync::Arc;
 use std::time::Duration;
 

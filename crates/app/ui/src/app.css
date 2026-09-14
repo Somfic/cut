@@ -1,0 +1,39 @@
+/* Glow paints the window; this file says where it must not. */
+
+:root {
+  color-scheme: dark;
+}
+
+/* The stage is a hole onto the video surface, and a hole is the absence of
+   paint — so nothing above it may have a background. The surface clears to
+   the same colour, so the window still looks continuous. */
+html,
+body,
+#app {
+  background: transparent !important;
+}
+
+html, body { margin: 0; height: 100%; }
+
+body {
+  /* A column of chrome with the stage taking what is left. If the stage
+     collapses there is no rect and the surface never presents. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Svelte mounts here, so this is what panels size against, not `body`. */
+#app {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Keeps Glow's Root wrapper from breaking the flex chain to the stage. */
+#app > :global(*) {
+  display: contents;
+}

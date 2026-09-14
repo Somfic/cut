@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>cut</title>
+    <script>
+      // There is no console in a release webview, and a page that fails to
+      // mount is indistinguishable from a transparent one: the window just
+      // shows the video surface underneath. So say so, loudly, on the page.
+      function showError(what) {
+        const box = document.getElementById('boot-error') ?? document.body
+        box.hidden = false
+        box.style.cssText =
+          'position:fixed;inset:0;z-index:9999;padding:16px;overflow:auto;' +
+          'background:#2a1416;color:#ffb4b4;font:12px ui-monospace,monospace;white-space:pre-wrap'
+        box.textContent = String(what)
+      }
+      // Capture phase, because a failed script or stylesheet fires `error`
+      // on the element and never bubbles up to the window.
+      addEventListener('error', (e) => {
+        const el = e.target
+        if (el instanceof HTMLElement) showError(`failed to load ${el.getAttribute('src') ?? el.getAttribute('href')}`)
+        else showError(`${e.message}\n${e.filename}:${e.lineno}`)
+      }, true)
+      addEventListener('unhandledrejection', (e) => showError(`unhandled rejection: ${e.reason}`))
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <pre id="boot-error" hidden></pre>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -31,7 +31,7 @@
           ];
         };
 
-        runtimeLibs = with pkgs; [
+        linuxLibs = with pkgs; [
           vulkan-loader
           wayland
           libxkbcommon
@@ -40,9 +40,17 @@
           xorg.libXcursor
           xorg.libXrandr
           xorg.libXi
-          gst_all_1.gstreamer
-          gst_all_1.gst-plugins-base
+          # tauri's webview
+          webkitgtk_4_1
+          libsoup_3
         ];
+
+        runtimeLibs =
+          (with pkgs; [
+            gst_all_1.gstreamer
+            gst_all_1.gst-plugins-base
+          ])
+          ++ pkgs.lib.optionals pkgs.stdenv.isLinux linuxLibs;
       in
       {
         devShells.default = pkgs.mkShell {
@@ -50,38 +58,41 @@
             pkg-config
           ];
 
-          buildInputs = with pkgs; [
-            rustToolchain
+          buildInputs =
+            (with pkgs; [
+              rustToolchain
+              cargo-tauri
 
-            # audio (cpal)
-            alsa-lib
+              # frontend
+              bun
+              nodejs
 
-            # gstreamer stack
-            glib
-            gst_all_1.gstreamer
-            gst_all_1.gst-plugins-base
-            gst_all_1.gst-plugins-good
-            gst_all_1.gst-plugins-bad
-            gst_all_1.gst-plugins-ugly
-            gst_all_1.gst-libav
+              # gstreamer stack
+              glib
+              gst_all_1.gstreamer
+              gst_all_1.gst-plugins-base
+              gst_all_1.gst-plugins-good
+              gst_all_1.gst-plugins-bad
+              gst_all_1.gst-plugins-ugly
+              gst_all_1.gst-libav
 
-            # graphics / windowing (iced + wgpu)
-            vulkan-loader
-            wayland
-            libxkbcommon
-            libGL
-            fontconfig
-            freetype
-            xorg.libX11
-            xorg.libXcursor
-            xorg.libXrandr
-            xorg.libXi
-
-            # tooling
-            ripgrep
-            fd
-            bat
-          ];
+              # tooling
+              ripgrep
+              fd
+              bat
+            ])
+            ++ pkgs.lib.optionals pkgs.stdenv.isLinux (
+              with pkgs;
+              [
+                # audio (cpal); CoreAudio covers this on darwin
+                alsa-lib
+                gtk3
+                glib-networking
+                librsvg
+                openssl
+              ]
+              ++ linuxLibs
+            );
 
           shellHook = ''
             export PATH="$HOME/.cargo/bin:$PATH"

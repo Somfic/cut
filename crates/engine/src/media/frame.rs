@@ -16,11 +16,8 @@ pub enum PixelLayout {
 
 /// A decoded picture, still in the buffer gstreamer decoded it into.
 ///
-/// The planes are not copied out and not repacked. Decoders write rows padded
-/// to a stride of their choosing, and the obvious way to deal with that is to
-/// tighten them up into a `Vec` — but a texture upload takes a row stride, so
-/// nothing has to be moved. Skipping that pass is worth 3 MB of copying and a
-/// 3 MB allocation per frame at 1080p, and four times that at 4K.
+/// Not copied out and not repacked: a texture upload takes a row stride, so
+/// the decoder's padded rows can go to the GPU where they lie.
 pub struct Frame {
     pub width: u32,
     pub height: u32,
@@ -32,10 +29,7 @@ pub struct Frame {
 }
 
 impl Frame {
-    /// The luma plane, and the byte offset between its rows.
-    ///
-    /// The slice spans whole rows including whatever padding the decoder left
-    /// on the end of each, so it must be read with `y_stride`, not `width`.
+    /// The luma plane. Spans padded rows, so read it with `y_stride`.
     pub fn y(&self) -> &[u8] {
         self.plane(0)
     }
@@ -77,8 +71,8 @@ impl TryFrom<Sample> for Frame {
             other => return Err(anyhow!("unsupported pixel format: {other:?}")),
         };
 
-        // Owned rather than borrowed: the mapping outlives this call, which is
-        // what lets the planes be uploaded later without being copied first.
+        // Owned: the mapping outlives this call, so the planes can be
+        // uploaded later without a copy.
         let buffer = sample
             .buffer_owned()
             .context("sample had no buffer")?;
@@ -87,7 +81,7 @@ impl TryFrom<Sample> for Frame {
         let mapped = gst_video::VideoFrame::from_buffer_readable(buffer, &info)
             .map_err(|_| anyhow!("failed to map buffer as a readable video frame"))?;
 
-        // Both planes are read below, so fail here rather than at upload time.
+        // Fail here rather than at upload time.
         for plane in 0..2 {
             mapped
                 .plane_data(plane)

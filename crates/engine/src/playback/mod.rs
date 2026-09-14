@@ -6,10 +6,15 @@ mod player;
 mod sinks;
 mod transport;
 
-pub use clock::Clock;
-pub use controls::{Controls, PlaybackState, Request};
-pub use decoder::{Decoder, SeekMode};
-pub use engine::Engine;
-pub use player::Player;
-pub use sinks::{AudioSink, Sinks, VideoSink, VideoStream};
+// What a front end needs: a stream of events, and a handle to drive playback.
+pub use controls::{Controls, Request};
+pub use decoder::SeekMode;
 pub use transport::{Event, transport};
+
+// The machinery behind them.
+pub(crate) use clock::Clock;
+pub(crate) use controls::PlaybackState;
+pub(crate) use decoder::Decoder;
+pub(crate) use engine::Engine;
+pub(crate) use player::Player;
+pub(crate) use sinks::{AudioSink, Sinks, VideoSink, VideoStream};

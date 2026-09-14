@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "What the page is allowed to ask the runtime for. The window controls are here because the title bar is drawn by the page, so closing, minimising, zooming and dragging the window are all its job now.",
+  "windows": ["main"],
+  "webviews": ["ui"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging"
+  ]
+}

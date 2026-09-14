@@ -12,6 +12,20 @@ use crate::media::Source;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct ClipId(pub(super) u64);
 
+impl ClipId {
+    /// The bare number. A front end that cannot hold a `ClipId` — anything
+    /// across a serialisation boundary — carries this and hands it back.
+    pub fn raw(self) -> u64 {
+        self.0
+    }
+
+    /// The inverse. Not checked against the document: an id for a clip that
+    /// has since gone simply matches nothing.
+    pub fn from_raw(id: u64) -> Self {
+        ClipId(id)
+    }
+}
+
 #[derive(Clone)]
 pub struct Clip {
     pub id: ClipId,

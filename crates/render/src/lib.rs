@@ -1,9 +1,5 @@
-//! Putting a decoded [`Frame`] on the screen.
-//!
-//! Split out from any one front end because the upload path is the part that
-//! has to stay fast: the planes go to the GPU untouched and the shader does
-//! the YUV conversion, so whatever is driving the window — iced, a webview
-//! overlay — gets the same picture at the same cost.
+//! Putting a decoded [`Frame`] on screen: the planes go to the GPU untouched
+//! and the shader does the YUV conversion.
 
 use std::sync::Arc;
 
@@ -240,10 +236,8 @@ impl FrameRenderer {
                 aspect: wgpu::TextureAspect::All,
             },
             frame.y(),
-            // The decoder's own stride, so its padded rows are uploaded where
-            // they lie rather than being packed down first. `write_texture`
-            // puts no alignment requirement on this — unlike a buffer copy,
-            // which would need a multiple of 256.
+            // The decoder's own stride. `write_texture` puts no alignment
+            // requirement on it, unlike a buffer copy.
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(frame.y_stride()),
@@ -276,10 +270,8 @@ impl FrameRenderer {
         );
     }
 
-    /// The dimensions of the frame currently on the GPU, if there is one.
-    ///
-    /// A caller that uploads and presents from different threads needs this:
-    /// by the time it draws, it no longer has the `Frame` to ask.
+    /// What is currently on the GPU. A caller that uploads and presents on
+    /// different threads no longer has the `Frame` to ask by the time it draws.
     pub fn uploaded_size(&self) -> Option<(u32, u32)> {
         self.texture.as_ref().map(|texture| texture.size)
     }

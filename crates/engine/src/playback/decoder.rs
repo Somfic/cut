@@ -119,10 +119,6 @@ impl Decoder {
         self.pipeline.set_state(State::Paused).ok();
     }
 
-    pub fn fps(&self) -> f64 {
-        self.source.fps()
-    }
-
     pub fn seek_to_frame(
         &self,
         frame: usize,

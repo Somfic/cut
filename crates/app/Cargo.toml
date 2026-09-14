@@ -3,6 +3,9 @@ name = "cut"
 version = "0.1.0"
 edition = "2024"
 
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
 [[bin]]
 name = "cut"
 path = "src/main.rs"
@@ -12,6 +15,8 @@ anyhow = { workspace = true }
 cut-engine = { path = "../engine" }
 cut-render = { path = "../render" }
 futures = { workspace = true }
-futures-timer = { workspace = true }
-iced = { version = "0.14.0", features = ["wgpu", "canvas"] }
-rfd = "0.17.2"
+serde = { version = "1", features = ["derive"] }
+# `unstable` is what gates `Window::add_child`, the multi-surface API the whole
+# approach rests on.
+tauri = { version = "2", features = ["unstable", "macos-private-api"] }
+wgpu = "27"

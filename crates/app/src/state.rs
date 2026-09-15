@@ -1,12 +1,51 @@
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
 use cut_engine::media::Frame;
 use cut_engine::playback::Controls;
 use cut_engine::project::Timeline;
 
-/// Where the video goes, in physical pixels. Owned by the page, which
-/// reports the rect of the element standing in for the preview.
+#[derive(Default)]
+pub struct State {
+    pub slot: FrameSlot,
+    pub surface: Surface,
+    pub session: Session,
+    pub counters: Counters,
+}
+
+#[derive(Default)]
+pub struct FrameSlot {
+    frame: Mutex<Option<Arc<Frame>>>,
+    arrived: Condvar,
+    uploaded: AtomicU64,
+}
+
+impl FrameSlot {
+    pub fn put(&self, frame: Arc<Frame>) -> bool {
+        let displaced = self.frame.lock().unwrap().replace(frame).is_some();
+        self.arrived.notify_one();
+        displaced
+    }
+
+    pub fn take(&self) -> Arc<Frame> {
+        let mut slot = self.frame.lock().unwrap();
+        loop {
+            if let Some(frame) = slot.take() {
+                return frame;
+            }
+            slot = self.arrived.wait(slot).unwrap();
+        }
+    }
+
+    pub fn uploaded(&self) {
+        self.uploaded.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.uploaded.load(Ordering::Relaxed)
+    }
+}
+
 #[derive(Default, Clone, Copy, PartialEq, Debug)]
 pub struct Rect {
     pub x: f32,
@@ -16,26 +55,22 @@ pub struct Rect {
 }
 
 #[derive(Default)]
-pub struct Shared {
-    /// Latest-wins: a preview that falls behind should skip, not queue up.
-    pub frame: Mutex<Option<Arc<Frame>>>,
-    /// Signalled on a new frame, so the uploader sleeps rather than polls.
-    pub arrived: Condvar,
-    pub timeline: Mutex<Option<Arc<Timeline>>>,
+pub struct Surface {
     pub rect: Mutex<Option<Rect>>,
     pub chrome: Mutex<Option<(f64, f64, f64)>>,
-    /// The page's viewport. Only a check: it should equal the surface size,
-    /// and a lasting disagreement means the two have stopped sharing a space.
     pub page: Mutex<Option<(f32, f32)>>,
-    pub controls: Mutex<Option<Controls>>,
-    /// Bumped per upload, so the presenter can skip a turn with nothing new.
-    pub uploaded: AtomicU64,
-    /// Totals, not rates: a smoothed rate is dominated by bursts.
-    pub frames: AtomicU64,
-    pub presents: AtomicU64,
-    /// Replaced before the uploader ever took them.
-    pub dropped: AtomicU64,
-    pub fps: Mutex<f64>,
-    pub running: AtomicBool,
 }
 
+#[derive(Default)]
+pub struct Session {
+    pub timeline: Mutex<Option<Arc<Timeline>>>,
+    pub controls: Mutex<Option<Controls>>,
+    pub fps: Mutex<f64>,
+}
+
+#[derive(Default)]
+pub struct Counters {
+    pub frames: AtomicU64,
+    pub presents: AtomicU64,
+    pub dropped: AtomicU64,
+}

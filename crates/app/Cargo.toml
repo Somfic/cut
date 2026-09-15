@@ -5,6 +5,9 @@ edition = "2024"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+draad-codegen = { git = "https://github.com/somfic/draad", features = [
+    "tauri",
+] }
 
 [[bin]]
 name = "cut"
@@ -22,3 +25,8 @@ serde = { version = "1", features = ["derive"] }
 # approach rests on.
 tauri = { version = "2", features = ["unstable", "macos-private-api"] }
 wgpu = "27"
+
+# Killing the dev server means killing its whole process group: `bun run dev`
+# runs vite as a grandchild.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

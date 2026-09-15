@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 
 use draad::{api, ty};
 
-use crate::state::{Rect, Shared};
+use crate::state::{Rect, State};
 
 /// Totals, not rates: a smoothed rate is dominated by bursts.
 #[ty]
@@ -37,7 +37,7 @@ pub trait SurfaceApi {
 }
 
 #[api]
-impl SurfaceApi for Arc<Shared> {
+impl SurfaceApi for Arc<State> {
     async fn set_rect(
         &self,
         x: f32,
@@ -47,19 +47,19 @@ impl SurfaceApi for Arc<Shared> {
         page_width: f32,
         page_height: f32,
     ) {
-        *self.rect.lock().unwrap() = Some(Rect { x, y, width, height });
-        *self.page.lock().unwrap() = Some((page_width, page_height));
+        *self.surface.rect.lock().unwrap() = Some(Rect { x, y, width, height });
+        *self.surface.page.lock().unwrap() = Some((page_width, page_height));
     }
 
     async fn set_chrome(&self, r: f64, g: f64, b: f64) {
-        *self.chrome.lock().unwrap() = Some((r, g, b));
+        *self.surface.chrome.lock().unwrap() = Some((r, g, b));
     }
 
     async fn stats(&self) -> StatsDto {
         StatsDto {
-            frames: self.frames.load(Ordering::Relaxed),
-            presents: self.presents.load(Ordering::Relaxed),
-            dropped: self.dropped.load(Ordering::Relaxed),
+            frames: self.counters.frames.load(Ordering::Relaxed),
+            presents: self.counters.presents.load(Ordering::Relaxed),
+            dropped: self.counters.dropped.load(Ordering::Relaxed),
         }
     }
 }

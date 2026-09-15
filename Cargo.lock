@@ -629,7 +629,9 @@ dependencies = [
  "cut-engine",
  "cut-render",
  "draad",
+ "draad-codegen",
  "futures",
+ "libc",
  "serde",
  "tauri",
  "tauri-build",
@@ -886,7 +888,7 @@ dependencies = [
 [[package]]
 name = "draad"
 version = "0.3.0"
-source = "git+https://github.com/somfic/draad#cb07cecb3ce55b4d6d417572137f11cd67e0870e"
+source = "git+https://github.com/somfic/draad#2507a59fd86914bf6775ae9aa6bc32e013a1245e"
 dependencies = [
  "draad-codegen",
  "draad-macros",
@@ -897,7 +899,7 @@ dependencies = [
 [[package]]
 name = "draad-codegen"
 version = "0.3.0"
-source = "git+https://github.com/somfic/draad#cb07cecb3ce55b4d6d417572137f11cd67e0870e"
+source = "git+https://github.com/somfic/draad#2507a59fd86914bf6775ae9aa6bc32e013a1245e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -908,7 +910,7 @@ dependencies = [
 [[package]]
 name = "draad-macros"
 version = "0.3.0"
-source = "git+https://github.com/somfic/draad#cb07cecb3ce55b4d6d417572137f11cd67e0870e"
+source = "git+https://github.com/somfic/draad#2507a59fd86914bf6775ae9aa6bc32e013a1245e"
 dependencies = [
  "draad-codegen",
  "proc-macro2",
@@ -1925,7 +1927,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.58.0",
 ]
 
 [[package]]

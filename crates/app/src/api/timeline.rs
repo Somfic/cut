@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use draad::{api, ty};
 
-use crate::state::Shared;
+use crate::state::State;
 
 /// The document, flattened for the canvas. Sent per edit, not per frame.
 #[ty]
@@ -33,9 +33,9 @@ pub trait TimelineApi {
 }
 
 #[api]
-impl TimelineApi for Arc<Shared> {
+impl TimelineApi for Arc<State> {
     async fn get(&self) -> Option<TimelineDto> {
-        let timeline = self.timeline.lock().unwrap().clone()?;
+        let timeline = self.session.timeline.lock().unwrap().clone()?;
 
         Some(TimelineDto {
             length: timeline.length(),

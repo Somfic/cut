@@ -10,7 +10,6 @@ export type TrackDto = { clips: ClipDto[], };
 
 export type ClipDto = { id: number, position: number, length: number, source_start: number, source_length: number, name: string, };
 
-/** A correction, not a feed: the page runs its own clock between polls. */
 export type TransportDto = { playhead: number, playing: boolean, fps: number, };
 
 export class SurfaceApi {

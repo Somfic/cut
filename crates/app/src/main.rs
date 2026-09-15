@@ -1,24 +1,15 @@
-//! A web front end over a native video surface: wgpu draws frames into the
-//! window, and a transparent webview sits on top holding the UI.
+use state::State;
+use std::sync::{Arc, Mutex};
+use tauri::webview::WebviewBuilder;
+use tauri::window::WindowBuilder;
+use tauri::{PhysicalPosition, RunEvent, TitleBarStyle, WindowEvent};
 
 mod api;
 mod decode;
+mod frontend;
 mod gpu;
 mod state;
 
-use std::sync::{Arc, Mutex};
-
-use tauri::webview::WebviewBuilder;
-use tauri::window::WindowBuilder;
-use tauri::{PhysicalPosition, RunEvent, WebviewUrl, WindowEvent};
-
-use state::Shared;
-
-// Scans `src/api`, emits the tauri commands here and the typed client into
-// `ui/src/lib/schema/index.ts`.
-draad::include_generated!(std::sync::Arc<crate::state::Shared>, client_dir = "ui/src/lib/schema");
-
-/// Where a save goes when the command line does not say.
 const DEFAULT_PROJECT: &str = "project.cut";
 
 fn main() -> anyhow::Result<()> {
@@ -29,44 +20,40 @@ fn main() -> anyhow::Result<()> {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from(DEFAULT_PROJECT));
 
-    let shared = Arc::new(Shared::default());
+    let state = Arc::new(State::default());
 
+    // start frontend dev server
+    let frontend = std::sync::Mutex::new(Some(frontend::DevServer::start()));
+
+    // build tauri app
     let app = tauri::Builder::default()
-        .manage(shared.clone())
+        .manage(state.clone())
         .invoke_handler(invoke_handler())
         .build(tauri::generate_context!())?;
 
+    // create window
     let window = WindowBuilder::new(&app, "main")
         .title("cut")
         .inner_size(1280.0, 800.0)
         .transparent(true)
-        // Keep the native frame: rounded corners, the resize margin and the
-        // traffic lights all go with `decorations(false)`. `Overlay` only
-        // makes the title bar transparent, so the page still spans the frame.
-        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .title_bar_style(TitleBarStyle::Overlay)
         .hidden_title(true)
         .build()?;
 
-    let size = window.inner_size()?;
+    let webview = window.add_child(
+        WebviewBuilder::new("ui", frontend::url()).transparent(true),
+        PhysicalPosition::new(0, 0),
+        window.inner_size()?,
+    )?;
 
-    // Before the webview: on macOS subview order is creation order. On the
-    // main thread because Metal panics if a surface is made anywhere else.
+    // create gpu
     let gpu = gpu::Gpu::new(window.clone())?;
     let uploader = gpu.uploader();
     let gpu = Arc::new(Mutex::new(gpu));
 
-    // Physical: `inner_size` is device pixels, and `LogicalSize` here would
-    // build a webview twice the window's size on a 2x display.
-    let webview = window.add_child(
-        WebviewBuilder::new("ui", WebviewUrl::App("index.html".into())).transparent(true),
-        PhysicalPosition::new(0, 0),
-        size,
-    )?;
-
-    // Neither follows the window on its own, and a live resize runs in a
-    // nested event loop where `MainEventsCleared` stops arriving.
+    // repaint on resize
     {
-        let (gpu, shared) = (gpu.clone(), shared.clone());
+        let (gpu, shared) = (gpu.clone(), state.clone());
         window.on_window_event(move |event| {
             if let WindowEvent::Resized(size) = event {
                 if let Err(e) = webview.set_size(*size) {
@@ -81,24 +68,39 @@ fn main() -> anyhow::Result<()> {
         });
     }
 
-    decode::spawn_decoder(shared.clone(), project);
+    // start decoder
+    decode::spawn_decoder(state.clone(), project);
 
+    // start uploader
     {
-        let (shared, handle, gpu) = (shared.clone(), app.handle().clone(), gpu.clone());
+        let (shared, handle, gpu) = (state.clone(), app.handle().clone(), gpu.clone());
         std::thread::spawn(move || uploader.run(shared, handle, gpu));
     }
 
-    // Repaints an expose while paused. Not what paces playback: tao idles on
-    // `ControlFlow::Wait`, so with no input this fires twice a second.
+    // start app
     app.run(move |_handle, event| {
-        if let RunEvent::MainEventsCleared = event
-            && let Ok(mut gpu) = gpu.lock()
-            && let Err(e) = gpu.present(&shared)
-        {
-            eprintln!("present failed: {e:#}");
+        match event {
+            RunEvent::MainEventsCleared => {
+                if let Ok(mut gpu) = gpu.lock()
+                    && let Err(e) = gpu.present(&state)
+                {
+                    eprintln!("present failed: {e:#}");
+                }
+            }
+            // on exit kill frontend too
+            RunEvent::Exit => drop(frontend.lock().unwrap().take()),
+            _ => {}
         }
     });
 
     Ok(())
 }
 
+// generated stuff
+#[allow(non_camel_case_types, dead_code, unused_imports)]
+mod generated {
+    pub(super) type __DraadState = std::sync::Arc<crate::state::State>;
+    pub(super) type __DraadBus = ();
+    include!("generated.rs");
+}
+use generated::invoke_handler;

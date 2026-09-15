@@ -6,5 +6,9 @@
     "verbatimModuleSyntax": true,
     "strict": true
   },
-  "include": ["ui/src/**/*.ts", "ui/src/**/*.svelte", "vite.config.ts"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.svelte",
+    "vite.config.ts"
+  ]
 }

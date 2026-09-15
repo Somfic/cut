@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { AnimatedValue, Button, Root, Text } from "glow";
+  import { AnimatedValue, Button, Root, Text, toast } from "glow";
   import Titlebar from "./lib/Titlebar.svelte";
   import Stage from "./lib/Stage.svelte";
   import Timeline from "./lib/Timeline.svelte";
+  import { type Menu } from "./lib/Menubar.svelte";
   import api, {
     Playhead,
     timecode,
@@ -14,6 +15,91 @@
 
   let timeline = $state<TimelineDto | null>(null);
   let readout = $state("");
+
+  // Nothing behind the file commands yet — the menu is the shape of the API
+  // the engine still has to grow.
+  const soon = (what: string) => () => toast.info(`${what} isn't wired up yet`);
+
+  const menus: Menu[] = $derived([
+    {
+      label: "File",
+      items: [
+        {
+          kind: "submenu",
+          label: "Import",
+          icon: "Import",
+          items: [
+            {
+              kind: "item",
+              label: "From folder\u2026",
+              icon: "Folder",
+              onclick: soon("Import from folder"),
+            },
+            {
+              kind: "item",
+              label: "From file\u2026",
+              icon: "File",
+              shortcut: "mod+i",
+              onclick: soon("Import from file"),
+            },
+          ],
+        },
+        "divider",
+        {
+          kind: "item",
+          label: "Export\u2026",
+          icon: "Download",
+          shortcut: "mod+e",
+          onclick: soon("Export"),
+        },
+      ],
+    },
+    {
+      label: "Edit",
+      items: [
+        {
+          kind: "item",
+          label: "Undo",
+          icon: "Undo",
+          shortcut: "mod+z",
+          onclick: soon("Undo"),
+        },
+        {
+          kind: "item",
+          label: "Redo",
+          icon: "Redo",
+          shortcut: "mod+shift+z",
+          onclick: soon("Redo"),
+        },
+      ],
+    },
+    {
+      label: "Playback",
+      items: [
+        {
+          kind: "item",
+          label: playhead.playing ? "Pause" : "Play",
+          icon: playhead.playing ? "Pause" : "Play",
+          shortcut: "space",
+          onclick: api.transport.toggle,
+        },
+        "divider",
+        {
+          kind: "item",
+          label: "Go to start",
+          icon: "SkipBack",
+          onclick: () => api.transport.seek(0),
+        },
+        {
+          kind: "item",
+          label: "Go to end",
+          icon: "SkipForward",
+          disabled: !timeline,
+          onclick: () => api.transport.seek(timeline?.length ?? 0),
+        },
+      ],
+    },
+  ]);
 
   // The document and the playhead's basis are pushed, so nothing polls for
   // them. `get`/`state` are only the initial fetch, before the first event.
@@ -73,7 +159,7 @@
 </script>
 
 <Root theme="dark">
-  <Titlebar />
+  <Titlebar {menus} />
   <Stage />
 
   <footer>

@@ -8,8 +8,14 @@ cargo tauri dev      # from this directory; starts vite too
 cargo tauri build
 ```
 
-Plain `cargo run` does not work once `devUrl` is set — Tauri loads the dev
-server, which only `cargo tauri dev` starts.
+`cargo run` starts vite and hot-reloads; `cargo run --release` builds the
+frontend and serves it from `ui/dist`. Both stop the dev server on exit.
+
+`build.rs` writes two generated files, neither of them committed:
+`crates/app/src/generated.rs` (the tauri commands) and
+`ui/src/lib/schema/index.ts` (the typed client). Run a cargo build before
+touching the frontend on its own — `bun run dev` in `ui/` alone cannot find
+the schema.
 
 ## macOS notes
 

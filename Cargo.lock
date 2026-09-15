@@ -888,7 +888,7 @@ dependencies = [
 [[package]]
 name = "draad"
 version = "0.3.0"
-source = "git+https://github.com/somfic/draad#2507a59fd86914bf6775ae9aa6bc32e013a1245e"
+source = "git+https://github.com/somfic/draad#9840af1b6d9c47d5d35df7428626147ff9e48a11"
 dependencies = [
  "draad-codegen",
  "draad-macros",
@@ -899,7 +899,7 @@ dependencies = [
 [[package]]
 name = "draad-codegen"
 version = "0.3.0"
-source = "git+https://github.com/somfic/draad#2507a59fd86914bf6775ae9aa6bc32e013a1245e"
+source = "git+https://github.com/somfic/draad#9840af1b6d9c47d5d35df7428626147ff9e48a11"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -910,7 +910,7 @@ dependencies = [
 [[package]]
 name = "draad-macros"
 version = "0.3.0"
-source = "git+https://github.com/somfic/draad#2507a59fd86914bf6775ae9aa6bc32e013a1245e"
+source = "git+https://github.com/somfic/draad#9840af1b6d9c47d5d35df7428626147ff9e48a11"
 dependencies = [
  "draad-codegen",
  "proc-macro2",

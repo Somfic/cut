@@ -15,7 +15,9 @@ pub fn spawn_decoder(shared: Arc<State>, project: std::path::PathBuf) {
             let mut since = Instant::now();
 
             loop {
-                std::thread::sleep(std::time::Duration::from_secs(2));
+                std::thread::sleep(std::time::Duration::from_secs(1));
+
+                crate::api::transport::publish(&shared);
 
                 let now = Instant::now();
                 let secs = (now - since).as_secs_f64();
@@ -38,7 +40,7 @@ pub fn spawn_decoder(shared: Arc<State>, project: std::path::PathBuf) {
     }
 
     {
-        let shared = shared.clone();
+        let state = shared.clone();
         std::thread::spawn(move || {
             futures::executor::block_on(async move {
                 let mut events = Box::pin(playback::transport(&project));
@@ -46,20 +48,25 @@ pub fn spawn_decoder(shared: Arc<State>, project: std::path::PathBuf) {
                 while let Some(event) = events.next().await {
                     match event {
                         playback::Event::Ready(controls) => {
-                            *shared.session.controls.lock().unwrap() = Some(controls);
+                            *state.session.controls.lock().unwrap() = Some(controls);
                         }
                         playback::Event::Opened { timeline, .. } => {
-                            *shared.session.timeline.lock().unwrap() = Some(timeline);
+                            if let Some(events) = state.events.get() {
+                                events
+                                    .timeline
+                                    .emit_changed(&crate::api::timeline::dto(&timeline));
+                            }
+                            *state.session.timeline.lock().unwrap() = Some(timeline);
                         }
                         playback::Event::Frame(frame) => {
-                            shared.counters.frames.fetch_add(1, Ordering::Relaxed);
+                            state.counters.frames.fetch_add(1, Ordering::Relaxed);
                             let fps = frame.fps.numer() as f64 / frame.fps.denom() as f64;
                             if fps > 0.0 {
-                                *shared.session.fps.lock().unwrap() = fps;
+                                *state.session.fps.lock().unwrap() = fps;
                             }
 
-                            if shared.slot.put(frame) {
-                                shared.counters.dropped.fetch_add(1, Ordering::Relaxed);
+                            if state.slot.put(frame) {
+                                state.counters.dropped.fetch_add(1, Ordering::Relaxed);
                             }
                         }
                     }

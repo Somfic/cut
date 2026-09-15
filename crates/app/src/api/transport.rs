@@ -1,9 +1,7 @@
-use std::sync::Arc;
-
-use cut_engine::playback::{Controls, Request, SeekMode};
-use draad::{api, ty};
-
 use crate::state::State;
+use cut_engine::playback::{Controls, Request, SeekMode};
+use draad::{api, events, ty};
+use std::sync::Arc;
 
 #[ty]
 pub struct TransportDto {
@@ -40,6 +38,7 @@ impl TransportApi for Arc<State> {
         if let Some(controls) = self.session.controls.lock().unwrap().as_mut() {
             controls.send(Request::Seek((frame, SeekMode::Accurate)));
         }
+        publish(self);
     }
 
     async fn toggle(&self) {
@@ -47,5 +46,27 @@ impl TransportApi for Arc<State> {
             Some(controls) => controls.send(Request::TogglePlayback),
             None => eprintln!("toggle: no controls yet"),
         }
+        publish(self);
     }
+}
+
+pub fn dto(state: &State) -> TransportDto {
+    let controls = state.session.controls.lock().unwrap();
+
+    TransportDto {
+        playhead: controls.as_ref().map_or(0, Controls::playhead),
+        playing: controls.as_ref().is_some_and(Controls::is_playing),
+        fps: state.session.fps.lock().unwrap().max(24.0),
+    }
+}
+
+pub fn publish(state: &State) {
+    if let Some(events) = state.events.get() {
+        events.transport.emit_changed(&dto(state));
+    }
+}
+
+#[events(namespace = "transport")]
+pub trait TransportEvents {
+    fn changed(payload: TransportDto);
 }

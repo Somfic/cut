@@ -66,15 +66,37 @@ export class TransportApi {
 	}
 }
 
+/** Pushed when the document changes, so the canvas never has to poll for it. */
+export class TimelineEvents {
+	constructor(private rpc: Rpc) {}
+
+	onChanged(handler: (payload: TimelineDto) => void): UnlistenFn {
+		return this.rpc.listen<TimelineDto>("timeline/changed", handler);
+	}
+}
+
+export class TransportEvents {
+	constructor(private rpc: Rpc) {}
+
+	onChanged(handler: (payload: TransportDto) => void): UnlistenFn {
+		return this.rpc.listen<TransportDto>("transport/changed", handler);
+	}
+}
+
 export class Api {
 	surface: SurfaceApi;
 	timeline: TimelineApi;
 	transport: TransportApi;
+	/** Pushed when the document changes, so the canvas never has to poll for it. */
+	timelineEvents: TimelineEvents;
+	transportEvents: TransportEvents;
 
 	constructor(private rpc: Rpc) {
 		this.surface = new SurfaceApi(rpc);
 		this.timeline = new TimelineApi(rpc);
 		this.transport = new TransportApi(rpc);
+		this.timelineEvents = new TimelineEvents(rpc);
+		this.transportEvents = new TransportEvents(rpc);
 	}
 
 	/**

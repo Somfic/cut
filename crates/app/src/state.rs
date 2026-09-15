@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 use cut_engine::media::Frame;
 use cut_engine::playback::Controls;
@@ -11,6 +11,7 @@ pub struct State {
     pub surface: Surface,
     pub session: Session,
     pub counters: Counters,
+    pub events: OnceLock<crate::generated::Events>,
 }
 
 #[derive(Default)]

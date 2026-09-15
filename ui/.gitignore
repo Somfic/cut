@@ -1,2 +1,5 @@
 node_modules
 dist
+
+# written by crates/app/build.rs, like its rust twin
+src/lib/schema/

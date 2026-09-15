@@ -31,6 +31,13 @@ fn main() -> anyhow::Result<()> {
         .invoke_handler(invoke_handler())
         .build(tauri::generate_context!())?;
 
+    // build events
+    let bus = draad::TauriBus::new(app.handle().clone());
+    state
+        .events
+        .set(generated::Events::new(bus))
+        .unwrap_or_else(|_| unreachable!("the app is built once"));
+
     // create window
     let window = WindowBuilder::new(&app, "main")
         .title("cut")
@@ -100,7 +107,7 @@ fn main() -> anyhow::Result<()> {
 #[allow(non_camel_case_types, dead_code, unused_imports)]
 mod generated {
     pub(super) type __DraadState = std::sync::Arc<crate::state::State>;
-    pub(super) type __DraadBus = ();
+    pub(super) type __DraadBus = ::draad::TauriBus<::tauri::Wry>;
     include!("generated.rs");
 }
 use generated::invoke_handler;

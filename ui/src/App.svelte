@@ -13,16 +13,30 @@
   let timeline = $state<TimelineDto | null>(null);
   let readout = $state("");
 
-  // Everything that changes per edit is pulled; everything that changes per
-  // frame is predicted. Only the corrections go over IPC, twice a second.
+  // The document and the playhead's basis are pushed, so nothing polls for
+  // them. `get`/`state` are only the initial fetch, before the first event.
+  $effect(() => {
+    syncChrome();
+
+    api.timeline.get().then((t) => (timeline = t));
+    api.transport.state().then((t) => playhead.sync(t));
+
+    const stop = [
+      api.timelineEvents.onChanged((t) => (timeline = t)),
+      api.transportEvents.onChanged((t) => playhead.sync(t)),
+    ];
+
+    return () => stop.forEach((off) => off());
+  });
+
+  // The playhead runs on the local clock between those corrections. The
+  // readout still polls: it is diagnostics, and pushing it would be traffic
+  // for its own sake.
   $effect(() => {
     let running = true;
     let last: StatsDto | null = null;
     let since = performance.now();
     let uiFrames = 0;
-
-    syncChrome();
-    api.timeline.get().then((t) => (timeline = t));
 
     const frame = () => {
       if (!running) return;
@@ -36,10 +50,9 @@
         uiFrames = 0;
         since = now;
 
-        Promise.all([api.transport.state(), api.surface.stats()])
-          .then(([t, s]) => {
-            playhead.sync(t);
-
+        api.surface
+          .stats()
+          .then((s) => {
             const rate = (to: number, from: number) =>
               last ? (to - from) / secs : 0;
             readout =

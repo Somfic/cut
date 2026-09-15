@@ -1,6 +1,6 @@
+use cut_engine::project::Timeline;
+use draad::{api, events, ty};
 use std::sync::Arc;
-
-use draad::{api, ty};
 
 use crate::state::State;
 
@@ -36,8 +36,13 @@ pub trait TimelineApi {
 impl TimelineApi for Arc<State> {
     async fn get(&self) -> Option<TimelineDto> {
         let timeline = self.session.timeline.lock().unwrap().clone()?;
+        Some(dto(&timeline))
+    }
+}
 
-        Some(TimelineDto {
+pub fn dto(timeline: &Timeline) -> TimelineDto {
+    {
+        TimelineDto {
             length: timeline.length(),
             tracks: timeline
                 .tracks
@@ -62,6 +67,12 @@ impl TimelineApi for Arc<State> {
                         .collect(),
                 })
                 .collect(),
-        })
+        }
     }
+}
+
+/// Pushed when the document changes, so the canvas never has to poll for it.
+#[events(namespace = "timeline")]
+pub trait TimelineEvents {
+    fn changed(payload: TimelineDto);
 }

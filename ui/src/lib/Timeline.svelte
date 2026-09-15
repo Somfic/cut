@@ -141,15 +141,19 @@
     ctx.roundRect(x, y, w, h, radius);
   }
 
-  /** Fit the whole document once its length and our width are both known. */
+  // fit once, when the document's length and our width are both known
   $effect(() => {
     if (fitted || !timeline || timeline.length === 0 || width === 0) return;
-    zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, width / timeline.length));
+    fit();
     fitted = true;
   });
 
-  // Redraw whenever anything it reads changes. `playhead` ticks at display
-  // rate, so this is the loop that has to stay cheap.
+  $effect(() => {
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
+  // redraw whenever anything it reads changes. `playhead`
   $effect(() => {
     void [timeline, playhead, zoom, scroll, width, height, fps];
     draw();
@@ -164,20 +168,65 @@
     return () => observer.disconnect();
   });
 
+  // zoom about a pixel column, keeping whatever is under it in place
+  function zoomBy(factor: number, at: number) {
+    const anchor = scroll + at / zoom;
+    zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * factor));
+    scroll = clampScroll(anchor - at / zoom);
+  }
+
+  // fit the whole document, or one second if there is nothing in it
+  function fit() {
+    const frames = timeline?.length || fps;
+    zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, width / frames));
+    scroll = 0;
+  }
+
+  // never past the end of the document, never before the start
+  function clampScroll(to: number): number {
+    const frames = timeline?.length ?? 0;
+    return Math.max(0, Math.min(to, Math.max(0, frames - width / zoom)));
+  }
+
   function onWheel(event: WheelEvent) {
     event.preventDefault();
 
-    if (event.ctrlKey || event.metaKey) {
-      // Zoom about the pointer.
-      const anchor = scroll + event.offsetX / zoom;
-      zoom = Math.min(
-        MAX_ZOOM,
-        Math.max(MIN_ZOOM, zoom * Math.exp(-event.deltaY / 200)),
-      );
-      scroll = Math.max(0, anchor - event.offsetX / zoom);
-    } else {
-      scroll = Math.max(0, scroll + event.deltaX / zoom);
+    // a trackpad pinch arrives as a wheel with `ctrlKey`; `alt` is the
+    // equivalent for a mouse, which has no pinch and no horizontal axis
+    if (event.ctrlKey || event.metaKey || event.altKey) {
+      zoomBy(Math.exp(-event.deltaY / 200), event.offsetX);
+      return;
     }
+
+    // fall back to the vertical axis: a plain mouse wheel has no deltaX, and
+    // without this it could neither pan nor zoom.
+    const delta = event.deltaX !== 0 ? event.deltaX : event.deltaY;
+    scroll = clampScroll(scroll + delta / zoom);
+  }
+
+  // zoom from the keyboard, about the playhead rather than the pointer. */
+  function onKeyDown(event: KeyboardEvent) {
+    if (!(event.ctrlKey || event.metaKey)) return;
+
+    const at = xOf(playhead);
+    const centre = at >= 0 && at <= width ? at : width / 2;
+
+    switch (event.key) {
+      case "=":
+      case "+":
+        zoomBy(1.4, centre);
+        break;
+      case "-":
+        zoomBy(1 / 1.4, centre);
+        break;
+      case "0":
+        fit();
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
   }
 
   function onPointerDown(event: PointerEvent) {

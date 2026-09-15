@@ -160,13 +160,14 @@ impl Document {
 
         for (t, track) in self.tracks.iter().enumerate() {
             for (c, entry) in track.clips.iter().enumerate() {
-                let source: Arc<Source> = sources.get(entry.source).cloned().with_context(|| {
-                    format!(
-                        "track {t} clip {c} names source {} of {}",
-                        entry.source,
-                        sources.len()
-                    )
-                })?;
+                let source: Arc<Source> =
+                    sources.get(entry.source).cloned().with_context(|| {
+                        format!(
+                            "track {t} clip {c} names source {} of {}",
+                            entry.source,
+                            sources.len()
+                        )
+                    })?;
 
                 let available = source.frame_count();
                 if entry.source_start >= available {
@@ -228,7 +229,11 @@ impl Document {
         }
 
         if !unresolved.is_empty() {
-            bail!("could not open {} source(s):\n{}", unresolved.len(), unresolved.join("\n"));
+            bail!(
+                "could not open {} source(s):\n{}",
+                unresolved.len(),
+                unresolved.join("\n")
+            );
         }
 
         for (entry, source) in self.sources.iter().zip(&sources) {
@@ -292,8 +297,8 @@ fn write_atomically(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
         .ok_or_else(|| anyhow!("{} is not a file", path.display()))?;
     let temp = base_dir(path).join(format!(".{}.saving", name.to_string_lossy()));
 
-    let mut file = File::create(&temp)
-        .with_context(|| format!("could not create {}", temp.display()))?;
+    let mut file =
+        File::create(&temp).with_context(|| format!("could not create {}", temp.display()))?;
     file.write_all(bytes)
         .with_context(|| format!("could not write {}", temp.display()))?;
     // The rename is only worth anything once the bytes are on the device.
@@ -301,8 +306,7 @@ fn write_atomically(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
         .with_context(|| format!("could not flush {}", temp.display()))?;
     drop(file);
 
-    fs::rename(&temp, path)
-        .with_context(|| format!("could not move {} into place", temp.display()))
+    fs::rename(&temp, path).with_context(|| format!("could not move {} into place", temp.display()))
 }
 
 #[cfg(test)]

@@ -73,9 +73,7 @@ impl TryFrom<Sample> for Frame {
 
         // Owned: the mapping outlives this call, so the planes can be
         // uploaded later without a copy.
-        let buffer = sample
-            .buffer_owned()
-            .context("sample had no buffer")?;
+        let buffer = sample.buffer_owned().context("sample had no buffer")?;
         let time = buffer.pts().map(Duration::from).unwrap_or_default();
 
         let mapped = gst_video::VideoFrame::from_buffer_readable(buffer, &info)

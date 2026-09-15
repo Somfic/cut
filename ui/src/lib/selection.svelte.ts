@@ -32,6 +32,12 @@ class Selection {
     this.#ids.add(id)
   }
 
+  /** Replace the selection wholesale, the way select-all does. */
+  all(ids: Iterable<number>) {
+    this.#ids.clear()
+    for (const id of ids) this.#ids.add(id)
+  }
+
   /** Add or remove one, the way a shift-click does. */
   toggle(id: number) {
     if (!this.#ids.delete(id)) this.#ids.add(id)

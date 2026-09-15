@@ -51,15 +51,17 @@
     gap: 2px;
   }
 
+  /* Glow's own tokens: invented names here would silently fall back to their
+     literals and stop following the theme. */
   .menu {
     appearance: none;
     border: none;
     background: none;
-    border-radius: var(--glow-radius-sm, 4px);
+    border-radius: 4px;
     padding: 3px 8px;
     font: inherit;
-    font-size: var(--glow-text-sm, 13px);
-    color: var(--glow-fg-secondary, inherit);
+    font-size: 13px;
+    color: var(--glow-text-secondary);
     cursor: pointer;
   }
 

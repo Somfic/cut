@@ -2,10 +2,14 @@ use std::sync::Arc;
 
 use cut_engine::media::Source;
 use cut_engine::playback::Request;
-use cut_engine::project::{ClipId, Edge, Edit, Timeline};
+use cut_engine::project::{ClipId, Edge, Edit, History, Placement, Timeline, TrimTo};
 use draad::{api, ty};
 
-use crate::state::State;
+use crate::api::view;
+// Re-exported, not just imported: the generated commands for this namespace
+// glob this module, and undo answers with one of these.
+pub use crate::api::view::ViewDto;
+use crate::state::{State, Version};
 
 /// Which end of a clip a trim moves.
 #[ty]
@@ -24,12 +28,27 @@ impl From<EdgeDto> for Edge {
     }
 }
 
+/// Where a clip is being put.
+#[ty]
+pub struct PlacementDto {
+    pub clip: u64,
+    pub track: usize,
+    pub position: usize,
+}
+
+/// Which end of a clip is going where.
+#[ty]
+pub struct TrimDto {
+    pub clip: u64,
+    pub edge: EdgeDto,
+    pub frame: usize,
+}
+
 /// Changing the document.
 ///
-/// One method per `Edit` rather than one method taking a serialised `Edit`:
-/// the wire types are unit-only enums, and a flattened struct with every
-/// variant's fields made optional would move the "which fields go together"
-/// question from the type system to a runtime check on both sides.
+/// One method per `Edit`, and every one that acts on clips takes a set of
+/// them: a gesture over a selection is one edit, one set of checks and one
+/// step on the undo stack, whether it moved one clip or ten.
 ///
 /// `Edit::Place` is deliberately absent — it exists for loading and pasting,
 /// which name a source window the user never types, and neither goes through
@@ -43,41 +62,32 @@ pub trait EditApi {
     /// edge, pushing what follows later.
     async fn insert(&self, path: String, frame: usize) -> Result<(), String>;
 
-    /// Take a clip somewhere else. `track` may be one past the last, which
-    /// starts a new one.
-    async fn move_clip(&self, clip: u64, track: usize, position: usize) -> Result<(), String>;
+    /// Put clips where they are named. A `track` may be one past the last,
+    /// which starts a new one, and whatever is already in the way is shortened
+    /// to make room.
+    ///
+    /// `continuing` says this is another step of the gesture that sent the
+    /// last one — a held arrow key repeating — and so belongs in the undo step
+    /// already open rather than in one of its own.
+    async fn move_clips(&self, clips: Vec<PlacementDto>, continuing: bool) -> Result<(), String>;
 
-    /// Move one end of a clip to `frame`, leaving the other where it is.
-    async fn trim(&self, clip: u64, edge: EdgeDto, frame: usize) -> Result<(), String>;
+    /// Move one end of each clip, leaving the other where it is. A clip
+    /// growing into its neighbour shortens it.
+    async fn trim(&self, edges: Vec<TrimDto>) -> Result<(), String>;
 
-    /// Move several clips by the same offset, as one edit — one undo step,
-    /// and one set of checks, so a group that shuffles inside its own span
-    /// is not refused by the room it is about to vacate.
-    /// `overwrite` shortens whatever the group lands on to make room, rather
-    /// than refusing the move.
-    async fn nudge(
-        &self,
-        clips: Vec<u64>,
-        frames: i64,
-        tracks: i64,
-        overwrite: bool,
-    ) -> Result<(), String>;
+    /// Cut clips in two at `frame`.
+    async fn split(&self, clips: Vec<u64>, frame: usize) -> Result<(), String>;
 
-    /// Move the same end of several clips by the same offset, as one edit.
-    async fn stretch(&self, clips: Vec<u64>, edge: EdgeDto, frames: i64) -> Result<(), String>;
+    /// Remove clips, either leaving the gaps they held or closing them.
+    async fn delete(&self, clips: Vec<u64>, ripple: bool) -> Result<(), String>;
 
-    /// Cut a clip in two at `frame`.
-    async fn split(&self, clip: u64, frame: usize) -> Result<(), String>;
-
-    /// Remove a clip, either leaving the gap it held or closing it.
-    async fn delete(&self, clip: u64, ripple: bool) -> Result<(), String>;
-
-    /// Go back one version. False when there was nothing to go back to, which
-    /// is what greys the menu item out rather than an error.
-    async fn undo(&self) -> bool;
+    /// Go back one version, answering with where the timeline was when that
+    /// version was current. Nothing when there was nowhere to go back to,
+    /// which is not an error.
+    async fn undo(&self) -> Option<ViewDto>;
 
     /// Go forward one version, after an undo.
-    async fn redo(&self) -> bool;
+    async fn redo(&self) -> Option<ViewDto>;
 }
 
 #[api]
@@ -96,84 +106,70 @@ impl EditApi for Arc<State> {
         )
     }
 
-    async fn move_clip(&self, clip: u64, track: usize, position: usize) -> Result<(), String> {
-        apply(
+    async fn move_clips(&self, clips: Vec<PlacementDto>, continuing: bool) -> Result<(), String> {
+        change(
             self,
-            Edit::Move {
-                clip: ClipId::from_raw(clip),
-                track,
-                position,
-            },
+            continuing,
+            Edit::Move(
+                clips
+                    .into_iter()
+                    .map(|p| Placement {
+                        clip: ClipId::from_raw(p.clip),
+                        track: p.track,
+                        position: p.position,
+                    })
+                    .collect(),
+            ),
         )
     }
 
-    async fn trim(&self, clip: u64, edge: EdgeDto, frame: usize) -> Result<(), String> {
+    async fn trim(&self, edges: Vec<TrimDto>) -> Result<(), String> {
         apply(
             self,
-            Edit::Trim {
-                clip: ClipId::from_raw(clip),
-                edge: edge.into(),
-                frame,
-            },
+            Edit::Trim(
+                edges
+                    .into_iter()
+                    .map(|e| TrimTo {
+                        clip: ClipId::from_raw(e.clip),
+                        edge: e.edge.into(),
+                        frame: e.frame,
+                    })
+                    .collect(),
+            ),
         )
     }
 
-    async fn nudge(
-        &self,
-        clips: Vec<u64>,
-        frames: i64,
-        tracks: i64,
-        overwrite: bool,
-    ) -> Result<(), String> {
-        apply(
-            self,
-            Edit::Nudge {
-                clips: clips.into_iter().map(ClipId::from_raw).collect(),
-                frames: frames as isize,
-                tracks: tracks as isize,
-                overwrite,
-            },
-        )
-    }
-
-    async fn stretch(&self, clips: Vec<u64>, edge: EdgeDto, frames: i64) -> Result<(), String> {
-        apply(
-            self,
-            Edit::Stretch {
-                clips: clips.into_iter().map(ClipId::from_raw).collect(),
-                edge: edge.into(),
-                frames: frames as isize,
-            },
-        )
-    }
-
-    async fn split(&self, clip: u64, frame: usize) -> Result<(), String> {
+    async fn split(&self, clips: Vec<u64>, frame: usize) -> Result<(), String> {
         apply(
             self,
             Edit::Split {
-                clip: ClipId::from_raw(clip),
+                clips: ids(clips),
                 frame,
             },
         )
     }
 
-    async fn delete(&self, clip: u64, ripple: bool) -> Result<(), String> {
+    async fn delete(&self, clips: Vec<u64>, ripple: bool) -> Result<(), String> {
         apply(
             self,
             Edit::Delete {
-                clip: ClipId::from_raw(clip),
+                clips: ids(clips),
                 ripple,
             },
         )
     }
 
-    async fn undo(&self) -> bool {
+    async fn undo(&self) -> Option<ViewDto> {
         step(self, |history, current| history.undo(current))
     }
 
-    async fn redo(&self) -> bool {
+    async fn redo(&self) -> Option<ViewDto> {
         step(self, |history, current| history.redo(current))
     }
+}
+
+fn ids(clips: Vec<u64>) -> Vec<ClipId> {
+    clips.into_iter().map(ClipId::from_raw).collect()
 }
 
 fn source(path: &str) -> Result<Arc<Source>, String> {
@@ -182,21 +178,30 @@ fn source(path: &str) -> Result<Arc<Source>, String> {
         .map_err(|e| format!("could not open {path}: {e:#}"))
 }
 
-/// Carry out an edit on a copy of the document, and publish the result.
+/// Carry out an edit and publish the result.
 ///
-/// The copy is the point: `Timeline::apply` refuses an edit that would break
-/// an invariant, and a refusal has to leave what the user is looking at
-/// exactly as it was — including the undo stack, which is only recorded once
+/// `applied` hands back the document the edit would leave, so a refusal never
+/// reaches the session — including the undo stack, which is only recorded once
 /// the edit is known to have worked.
 fn apply(state: &State, edit: Edit) -> Result<(), String> {
+    change(state, false, edit)
+}
+
+/// The same, for an edit that may be another step of the gesture before it.
+fn change(state: &State, continuing: bool, edit: Edit) -> Result<(), String> {
     let mut slot = state.session.timeline.lock().unwrap();
     let current = slot.clone().ok_or("no document is open")?;
 
-    let mut next = (*current).clone();
-    next.apply(edit).map_err(|e| format!("{e:#}"))?;
-    let next = Arc::new(next);
+    let next = Arc::new(current.applied(edit).map_err(|e| format!("{e:#}"))?);
 
-    state.session.history.lock().unwrap().record(current);
+    let mut history = state.session.history.lock().unwrap();
+    if !(continuing && history.amend()) {
+        history.record(Version {
+            timeline: current,
+            view: view::current(state),
+        });
+    }
+    drop(history);
     *slot = Some(next.clone());
     drop(slot);
 
@@ -205,24 +210,28 @@ fn apply(state: &State, edit: Edit) -> Result<(), String> {
 }
 
 /// Undo and redo differ only in which end of the history they take from.
+///
+/// Hands back the view recorded with the version, for the front end to return
+/// to, or nothing when there was no step to take.
 fn step(
     state: &State,
-    take: impl FnOnce(&mut cut_engine::project::History, Arc<Timeline>) -> Option<Arc<Timeline>>,
-) -> bool {
+    take: impl FnOnce(&mut History<Version>, Version) -> Option<Version>,
+) -> Option<ViewDto> {
     let mut slot = state.session.timeline.lock().unwrap();
-    let Some(current) = slot.clone() else {
-        return false;
-    };
+    let timeline = slot.clone()?;
 
-    let Some(version) = take(&mut state.session.history.lock().unwrap(), current) else {
-        return false;
+    let here = Version {
+        timeline,
+        view: view::current(state),
     };
+    let there = take(&mut state.session.history.lock().unwrap(), here)?;
 
-    *slot = Some(version.clone());
+    *slot = Some(there.timeline.clone());
+    *state.session.view.lock().unwrap() = there.view;
     drop(slot);
 
-    publish(state, version);
-    true
+    publish(state, there.timeline);
+    Some(there.view)
 }
 
 /// Tell both halves that the document moved: the canvas so it redraws, and
@@ -300,13 +309,13 @@ mod tests {
         let state = session();
         let before = clips(&state);
 
-        block_on(state.split(first(&state), 150)).unwrap();
+        block_on(state.split(vec![first(&state)], 150)).unwrap();
         assert_eq!(clips(&state)[..2], [(0, 150), (150, 150)]);
 
-        assert!(block_on(state.undo()));
+        assert!(block_on(state.undo()).is_some());
         assert_eq!(clips(&state), before);
 
-        assert!(block_on(state.redo()));
+        assert!(block_on(state.redo()).is_some());
         assert_eq!(clips(&state)[..2], [(0, 150), (150, 150)]);
     }
 
@@ -314,10 +323,10 @@ mod tests {
     fn a_ripple_delete_closes_the_gap() {
         let state = session();
 
-        block_on(state.delete(first(&state), true)).unwrap();
+        block_on(state.delete(vec![first(&state)], true)).unwrap();
         assert_eq!(clips(&state), [(0, 300), (300, 300)]);
 
-        assert!(block_on(state.undo()));
+        assert!(block_on(state.undo()).is_some());
         assert_eq!(clips(&state), [(0, 300), (300, 300), (600, 300)]);
     }
 
@@ -326,17 +335,21 @@ mod tests {
         let state = session();
         let before = clips(&state);
 
-        // Past the end of a ten-second source: `Timeline::apply` refuses it.
-        let refused = block_on(state.trim(first(&state), EdgeDto::Out, 5_000));
+        // Past the end of a ten-second source: the engine refuses it.
+        let refused = block_on(state.trim(vec![TrimDto {
+            clip: first(&state),
+            edge: EdgeDto::Out,
+            frame: 5_000,
+        }]));
         assert!(refused.is_err());
         assert_eq!(clips(&state), before);
 
         // And nothing was recorded, so there is nothing to undo back to.
-        assert!(!block_on(state.undo()));
+        assert!(block_on(state.undo()).is_none());
     }
 
     #[test]
     fn undo_on_an_untouched_document_says_so() {
-        assert!(!block_on(session().undo()));
+        assert!(block_on(session().undo()).is_none());
     }
 }

@@ -15,12 +15,19 @@ pub fn spawn_decoder(shared: Arc<State>, project: std::path::PathBuf) {
             let mut since = Instant::now();
 
             loop {
-                std::thread::sleep(std::time::Duration::from_secs(1));
+                // Four times a second, because this is the correction the
+                // front end's own clock is steered by: it counts frames
+                // locally between these, and a whole second of free-running
+                // is a second of drift to swallow in one step.
+                std::thread::sleep(std::time::Duration::from_millis(250));
 
                 crate::api::transport::publish(&shared);
 
                 let now = Instant::now();
                 let secs = (now - since).as_secs_f64();
+                if secs < 1.0 {
+                    continue;
+                }
                 since = now;
 
                 let (f, p, d) = (

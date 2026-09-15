@@ -38,15 +38,43 @@ impl TransportApi for Arc<State> {
         if let Some(controls) = self.session.controls.lock().unwrap().as_mut() {
             controls.send(Request::Seek((frame, SeekMode::Accurate)));
         }
-        publish(self);
+
+        // The frame asked for, not the one playback is still showing: the
+        // request is queued for the decode thread, so reading the engine back
+        // here would answer with where the playhead was before the seek — and
+        // a scrub would trail the pointer by however long the queue takes.
+        announce(
+            self,
+            TransportDto {
+                playhead: frame,
+                ..dto(self)
+            },
+        );
     }
 
     async fn toggle(&self) {
-        match self.session.controls.lock().unwrap().as_mut() {
-            Some(controls) => controls.send(Request::TogglePlayback),
-            None => eprintln!("toggle: no controls yet"),
-        }
-        publish(self);
+        let playing = match self.session.controls.lock().unwrap().as_mut() {
+            Some(controls) => {
+                controls.send(Request::TogglePlayback);
+                controls.is_playing()
+            }
+            None => {
+                eprintln!("toggle: no controls yet");
+                return;
+            }
+        };
+
+        // Likewise: the engine flips its own flag when it picks the request
+        // up, so what it would say now is what it was doing a moment ago. The
+        // front end runs a clock of its own between corrections, and one
+        // stale `playing` keeps it running after a pause.
+        announce(
+            self,
+            TransportDto {
+                playing: !playing,
+                ..dto(self)
+            },
+        );
     }
 }
 
@@ -60,9 +88,15 @@ pub fn dto(state: &State) -> TransportDto {
     }
 }
 
+/// Tell the front end what the engine currently says.
 pub fn publish(state: &State) {
+    announce(state, dto(state));
+}
+
+/// Tell it something the engine has been asked for but has not caught up with.
+fn announce(state: &State, transport: TransportDto) {
     if let Some(events) = state.events.get() {
-        events.transport.emit_changed(&dto(state));
+        events.transport.emit_changed(&transport);
     }
 }
 

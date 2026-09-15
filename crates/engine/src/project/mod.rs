@@ -12,7 +12,7 @@ mod timeline;
 mod track;
 
 pub use clip::{Clip, ClipId};
-pub use edit::{Edge, Edit};
+pub use edit::{Edge, Edit, Placement, TrimTo};
 pub use history::History;
 pub use timeline::Timeline;
 pub use track::Track;

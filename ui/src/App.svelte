@@ -1,16 +1,21 @@
 <script lang="ts">
-  import { AnimatedValue, Button, Root, Text, toast } from "glow";
+  import { AnimatedValue, Button, registerShortcut, Root, Text, toast } from "glow";
   import Titlebar from "./lib/Titlebar.svelte";
   import Stage from "./lib/Stage.svelte";
   import Timeline from "./lib/Timeline.svelte";
   import { type Menu } from "./lib/Menubar.svelte";
   import { selection } from "./lib/selection.svelte";
+  import { viewport } from "./lib/viewport.svelte";
   import api, {
+    attempt,
     Playhead,
     timecode,
+    type ClipDto,
     type StatsDto,
+    type ViewDto,
     type TimelineDto,
   } from "./lib/api.svelte";
+  import { inside } from "./lib/timeline";
 
   const playhead = new Playhead();
 
@@ -21,49 +26,57 @@
   // the engine still has to grow.
   const soon = (what: string) => () => toast.info(`${what} isn't wired up yet`);
 
-  // An edit refused by the engine (a trim past the source, a move onto
-  // occupied frames) comes back as a message written for a person, so it is
-  // worth showing rather than swallowing.
-  const attempt = (edit: Promise<void>) =>
-    edit.catch((e) => toast.error(String(e?.message ?? e)));
+  /**
+   * Undo and redo hand back where the timeline was when that version was
+   * current, so going back a step goes back to the part of the document the
+   * step was about rather than leaving you to find it.
+   */
+  const step =
+    (what: string, go: () => Promise<ViewDto | null>) => async () => {
+      const view = await go();
+      if (!view) return toast.info(`Nothing to ${what}`);
 
-  const step = (what: string, go: () => Promise<boolean>) => async () => {
-    if (!(await go())) toast.info(`Nothing to ${what}`);
-  };
+      viewport.glide(view.scroll, view.zoom);
+      api.transport.seek(view.playhead);
+    };
 
-  // The clip the playhead is inside, which is what a menu command acts on
-  // until the timeline has a selection of its own.
-  const atPlayhead = $derived(
-    timeline?.tracks
-      .flatMap((track) => track.clips)
-      .find(
-        (clip) =>
-          playhead.frame >= clip.position &&
-          playhead.frame < clip.position + clip.length,
-      ) ?? null,
+  const clips = $derived(
+    timeline?.tracks.flatMap((track) => track.clips) ?? [],
   );
 
   // What an edit command acts on: what is selected, or the clip under the
   // playhead when nothing is. Same rule for every command, so the menu never
   // disagrees with itself about what "the clip" means.
   const targets = $derived.by(() => {
-    const clips = timeline?.tracks.flatMap((track) => track.clips) ?? [];
     const selected = clips.filter((clip) => selection.has(clip.id));
+    if (selected.length) return selected;
 
-    return selected.length ? selected : atPlayhead ? [atPlayhead] : [];
+    const under = clips.find((clip) => inside(clip, playhead.frame));
+    return under ? [under] : [];
   });
 
-  // Only a clip the playhead is actually inside can be cut in two.
+  // A cut lands between two frames, so the playhead being on a clip's first
+  // frame is not the playhead being inside it.
   const splittable = $derived(
     targets.filter(
-      (clip) =>
-        playhead.frame > clip.position &&
-        playhead.frame < clip.position + clip.length,
+      (clip) => playhead.frame > clip.position && inside(clip, playhead.frame),
     ),
   );
 
   const many = (what: string, n: number) =>
     n > 1 ? `${what} ${n} clips` : `${what} clip`;
+
+  const ids = (clips: ClipDto[]) => clips.map((clip) => clip.id);
+
+  const remove = (ripple: boolean) => attempt(api.edit.delete(ids(targets), ripple));
+
+  // Backspace does what Delete does. The menu row can only print one of them,
+  // and printing the one this keyboard has a key for is the less useful half.
+  $effect(() =>
+    registerShortcut("backspace", () => remove(false), {
+      disabled: targets.length === 0,
+    }),
+  );
 
   const menus: Menu[] = $derived([
     {
@@ -116,21 +129,25 @@
           shortcut: "mod+shift+z",
           onclick: step("redo", api.edit.redo),
         },
-        "divider",
         {
           kind: "item",
           label: "Split at playhead",
           icon: "Scissors",
           shortcut: "mod+b",
           disabled: splittable.length === 0,
-          // One edit each, so undoing a multi-clip split takes as many steps
-          // as it made. A single edit covering several clips is the engine's
-          // call, not something to fake from here.
           onclick: () =>
-            splittable.forEach((clip) =>
-              attempt(api.edit.split(clip.id, playhead.frame)),
-            ),
+            attempt(api.edit.split(ids(splittable), playhead.frame)),
         },
+        "divider",
+        {
+          kind: "item",
+          label: "Select all",
+          icon: "SquareDashedMousePointer",
+          shortcut: "mod+a",
+          disabled: clips.length === 0,
+          onclick: () => selection.all(ids(clips)),
+        },
+        "divider",
         {
           kind: "item",
           label: many("Delete", targets.length),
@@ -138,8 +155,7 @@
           shortcut: "delete",
           danger: true,
           disabled: targets.length === 0,
-          onclick: () =>
-            targets.forEach((clip) => attempt(api.edit.delete(clip.id, false))),
+          onclick: () => remove(false),
         },
         {
           kind: "item",
@@ -147,8 +163,7 @@
           icon: "Trash2",
           danger: true,
           disabled: targets.length === 0,
-          onclick: () =>
-            targets.forEach((clip) => attempt(api.edit.delete(clip.id, true))),
+          onclick: () => remove(true),
         },
       ],
     },
@@ -161,6 +176,13 @@
           icon: playhead.playing ? "Pause" : "Play",
           shortcut: "space",
           onclick: api.transport.toggle,
+        },
+        {
+          kind: "toggle",
+          label: "Follow playhead",
+          description: "Keep it centred and move the timeline past it",
+          checked: viewport.following,
+          onChange: (on) => (viewport.following = on),
         },
         "divider",
         {
@@ -274,7 +296,14 @@
     </span>
   </footer>
 
-  <Timeline {timeline} playhead={playhead.frame} fps={playhead.fps} />
+  <Timeline
+    {timeline}
+    playhead={playhead.frame}
+    exact={playhead.exact}
+    playing={playhead.playing}
+    fps={playhead.fps}
+    onScrub={(frame) => playhead.scrub(frame)}
+  />
 </Root>
 
 <style>

@@ -45,6 +45,12 @@ class Playhead {
    * no start and end to keep in step with.
    */
   scrub(frame: number) {
+    // Moving it by hand takes over from playback, rather than fighting it.
+    if (this.playing) {
+      this.playing = false;
+      api.transport.pause();
+    }
+
     this.#asked = { frame, until: performance.now() + Playhead.#PATIENCE };
     this.#base = frame;
     this.#since = performance.now();

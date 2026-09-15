@@ -20,6 +20,9 @@ pub trait TransportApi {
 
     /// Start or stop playback.
     async fn toggle(&self);
+
+    /// Stop playback, if it is running.
+    async fn pause(&self);
 }
 
 #[api]
@@ -69,6 +72,20 @@ impl TransportApi for Arc<State> {
             self,
             TransportDto {
                 playing: !playing,
+                ..dto(self)
+            },
+        );
+    }
+
+    async fn pause(&self) {
+        if let Some(controls) = self.session.controls.lock().unwrap().as_mut() {
+            controls.send(Request::Pause);
+        }
+
+        announce(
+            self,
+            TransportDto {
+                playing: false,
                 ..dto(self)
             },
         );

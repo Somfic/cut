@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 #[derive(Clone)]
 pub enum Request {
     TogglePlayback,
+    Pause,
     /// The document changed — play this one from now on.
     Open(Arc<Timeline>),
     Step((i64, SeekMode)),

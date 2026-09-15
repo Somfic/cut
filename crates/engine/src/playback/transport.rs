@@ -124,6 +124,7 @@ pub fn transport(project: &PathBuf) -> impl Stream<Item = Event> + use<> {
             select! {
                 cmd = command_rx.select_next_some() => match cmd {
                     Request::TogglePlayback => engine.toggle(),
+                    Request::Pause => engine.pause(),
                     Request::Open(opened) => {
                         timeline = opened;
                         length = timeline.length();

@@ -7,8 +7,8 @@ use crate::media::Source;
 use crate::project::{Edit, Timeline};
 
 pub const SOURCES: &[&str] = &["/Users/lucas/Downloads/trailer.webm"];
-const N_CLIPS: usize = 400;
-const CLIP_SECS: f64 = 10.0;
+const N_CLIPS: usize = 1;
+const CLIP_SECS: f64 = 60.0;
 
 pub fn timeline() -> anyhow::Result<Timeline> {
     let mut sources = Vec::new();

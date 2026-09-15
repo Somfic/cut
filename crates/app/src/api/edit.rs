@@ -70,6 +70,10 @@ pub trait EditApi {
     /// growing into its neighbour shortens it.
     async fn trim(&self, edges: Vec<TrimDto>) -> Result<(), String>;
 
+    /// Trim one clip's edge to `frame` and pull everything after it back into
+    /// the space that leaves.
+    async fn ripple(&self, clip: u64, edge: EdgeDto, frame: usize) -> Result<(), String>;
+
     /// Cut clips in two at `frame`.
     async fn split(&self, clips: Vec<u64>, frame: usize) -> Result<(), String>;
 
@@ -131,6 +135,17 @@ impl EditApi for Arc<State> {
                     })
                     .collect(),
             ),
+        )
+    }
+
+    async fn ripple(&self, clip: u64, edge: EdgeDto, frame: usize) -> Result<(), String> {
+        apply(
+            self,
+            Edit::Ripple {
+                clip: ClipId::from_raw(clip),
+                edge: edge.into(),
+                frame,
+            },
         )
     }
 

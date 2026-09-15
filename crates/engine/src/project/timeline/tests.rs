@@ -206,6 +206,64 @@ fn a_group_trim_one_clip_cannot_do_changes_nothing() {
 }
 
 #[test]
+fn a_ripple_trim_of_the_head_keeps_the_clip_where_it_was() {
+    let mut timeline = pair();
+    let first = ids(&timeline)[0];
+
+    // The playhead is 20 frames into a clip running 0..60: those frames go,
+    // and the clip stays where it started.
+    timeline
+        .apply(Edit::Ripple {
+            clip: first,
+            edge: Edge::In,
+            frame: 20,
+        })
+        .unwrap();
+
+    // 40 frames of source starting 20 in, and the clip after it moved back.
+    assert_eq!(windows(&timeline, 0), vec![(0, 20, 40), (40, 0, 30)]);
+    assert_eq!(timeline.length(), 70);
+}
+
+#[test]
+fn a_ripple_trim_of_the_tail_pulls_what_follows_back() {
+    let mut timeline = pair();
+    let first = ids(&timeline)[0];
+
+    timeline
+        .apply(Edit::Ripple {
+            clip: first,
+            edge: Edge::Out,
+            frame: 40,
+        })
+        .unwrap();
+
+    assert_eq!(windows(&timeline, 0), vec![(0, 0, 40), (40, 0, 30)]);
+    assert_eq!(timeline.length(), 70);
+}
+
+#[test]
+fn a_ripple_trim_needs_the_frame_inside_the_clip() {
+    let mut timeline = pair();
+    let first = ids(&timeline)[0];
+    let before = windows(&timeline, 0);
+
+    for frame in [0, 60, 200] {
+        assert!(
+            timeline
+                .applied(Edit::Ripple {
+                    clip: first,
+                    edge: Edge::In,
+                    frame,
+                })
+                .is_err()
+        );
+    }
+
+    assert_eq!(windows(&timeline, 0), before);
+}
+
+#[test]
 fn a_trim_can_grow_into_its_neighbour() {
     let mut timeline = Timeline::default();
     // A 60-frame window onto a 120-frame source, with a clip hard against

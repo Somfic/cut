@@ -1,6 +1,7 @@
 <script lang="ts">
   import api from "$lib/api";
   import { document } from "$lib/document.svelte";
+  import { mode } from "$lib/mode.svelte";
   import { playhead } from "$lib/playhead.svelte";
   import { selection } from "$lib/selection.svelte";
   import { Scene } from "$lib/timeline/scene";
@@ -56,12 +57,6 @@
   const at = () =>
     playhead.playing ? playhead.exact : scene.fades.head.value;
   const onHead = (x: number) => Math.abs(x - xOf(at())) <= HEAD / 2 + 2;
-
-  /** Both halves: the engine, which decodes, and the clock that is drawn. */
-  function seek(frame: number) {
-    playhead.scrub(frame);
-    api.transport.seek(frame);
-  }
 
   let pending = 0;
 
@@ -258,7 +253,7 @@
       // `repeat` means the key never came back up: a held key is one
       // gesture, and one undo step.
       if (selection.size) shift(frames * step, tracks, event.repeat);
-      else if (frames) seek(Math.max(0, playhead.frame + frames * step));
+      else if (frames) playhead.seek(Math.max(0, playhead.frame + frames * step));
 
       event.preventDefault();
       return;
@@ -336,12 +331,12 @@
     }
 
     if (!event.shiftKey && !event.metaKey) selection.clear();
-    seek(frameAt(event.offsetX));
+    playhead.seek(frameAt(event.offsetX));
   }
 
   function onPointerMove(event: PointerEvent) {
     if (scrubbing) {
-      seek(frameAt(event.offsetX));
+      playhead.seek(frameAt(event.offsetX));
       return;
     }
 
@@ -368,7 +363,7 @@
     }
 
     if (event.buttons & 1) {
-      seek(frameAt(event.offsetX));
+      playhead.seek(frameAt(event.offsetX));
       return;
     }
 
@@ -395,7 +390,7 @@
       const { idle } = pan;
       pan = null;
       cursor = "grab";
-      if (idle) seek(frameAt(event.offsetX));
+      if (idle) playhead.seek(frameAt(event.offsetX));
       return;
     }
 
@@ -412,6 +407,16 @@
 
     if (carried.edge) {
       const edge = carried.edge;
+
+      // A ripple closes one gap, so it is only an answer for one clip — and
+      // only when the trim took frames away. A clip growing has no gap to
+      // close; it overwrites what it grows into, as it does with the mode off.
+      const [only] = landed;
+      if (mode.ripple && landed.length === 1 && only.length < carried.held.length) {
+        api.edit.ripple(only.id, edge, edgeOf(only, edge));
+        return;
+      }
+
       api.edit.trim(
         landed.map((clip) => ({ clip: clip.id, edge, frame: edgeOf(clip, edge) })),
       );

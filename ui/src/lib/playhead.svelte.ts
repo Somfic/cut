@@ -52,6 +52,12 @@ class Playhead {
     this.exact = frame;
   }
 
+  /** Put it somewhere: the engine, which decodes, and the clock that is drawn. */
+  seek(frame: number) {
+    this.scrub(frame);
+    api.transport.seek(frame);
+  }
+
   /** Advance to now. Call once per animation frame. */
   tick() {
     if (!this.playing) return;

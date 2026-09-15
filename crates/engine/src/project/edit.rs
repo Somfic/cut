@@ -33,6 +33,17 @@ pub enum Edit {
     Move(Vec<Placement>),
     /// Move one end of each clip, leaving the other where it is.
     Trim(Vec<TrimTo>),
+    /// Trim one clip's edge to `frame` and close the gap it leaves: what
+    /// follows moves back by what the trim took, on every track.
+    ///
+    /// The one edit that names a single clip rather than a set. A ripple is
+    /// defined at one edit point — two of them would have two answers for how
+    /// far everything after should move.
+    Ripple {
+        clip: ClipId,
+        edge: Edge,
+        frame: usize,
+    },
     /// Cut clips in two at `frame`. Clips the frame is not inside are left
     /// alone, so one cut can be aimed at a whole selection.
     Split { clips: Vec<ClipId>, frame: usize },

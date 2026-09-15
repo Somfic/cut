@@ -88,6 +88,8 @@ impl Timeline {
                 }
             }
 
+            Edit::Ripple { clip, edge, frame } => self.ripple_trim(clip, edge, frame)?,
+
             Edit::Split { clips, frame } => {
                 for clip in clips {
                     self.split(clip, frame)?;
@@ -213,6 +215,32 @@ impl Timeline {
         trimmed.source_start = source_start;
         trimmed.length = length;
         self.insert(t, trimmed);
+
+        Ok(())
+    }
+
+    /// Trim to `frame` and pull everything after back into the space.
+    ///
+    /// The clip keeps the position it had: a head trim moves its start to
+    /// `frame`, and closing the gap moves it back to where it began.
+    fn ripple_trim(&mut self, clip: ClipId, edge: Edge, frame: usize) -> anyhow::Result<()> {
+        let (t, index) = self.locate(clip)?;
+        let trimmed = &self.tracks[t].clips[index];
+        let (start, end) = (trimmed.position, trimmed.end());
+
+        if frame <= start || frame >= end {
+            bail!("frame {frame} is not inside that clip");
+        }
+
+        // The gap opens where the frames were taken from: at the clip's start
+        // for a head trim, at its old end for a tail trim.
+        let (gap, taken) = match edge {
+            Edge::In => (frame, frame - start),
+            Edge::Out => (end, end - frame),
+        };
+
+        self.trim(clip, edge, frame)?;
+        self.ripple(gap, -(taken as isize));
 
         Ok(())
     }

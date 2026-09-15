@@ -6,21 +6,27 @@
   import Titlebar from "$components/Titlebar.svelte";
   import api, { type StatsDto } from "$lib/api";
   import { document } from "$lib/document.svelte";
+  import { mode } from "$lib/mode.svelte";
   import { playhead } from "$lib/playhead.svelte";
   import { selection } from "$lib/selection.svelte";
   import { timecode } from "$lib/timeline/geometry";
 
   let readout = $state("");
 
-  // Backspace does what Delete does; a menu row can only print one.
+  // Delete and Backspace do what the menu's X does; a row can only print one.
   $effect(() => {
     const clips = document.clips.filter((clip) => selection.has(clip.id));
+    const remove = () =>
+      api.edit.delete(
+        clips.map((clip) => clip.id),
+        mode.ripple,
+      );
 
-    return registerShortcut(
-      "backspace",
-      () => api.edit.delete(clips.map((clip) => clip.id), false),
-      { disabled: clips.length === 0 },
+    const stop = ["delete", "backspace"].map((key) =>
+      registerShortcut(key, remove, { disabled: clips.length === 0 }),
     );
+
+    return () => stop.forEach((off) => off());
   });
 
   // The readout polls: it is diagnostics, and pushing it would be traffic
@@ -75,6 +81,17 @@
       icon={playhead.playing ? "Pause" : "Play"}
       label={playhead.playing ? "Pause" : "Play"}
       onclick={api.transport.toggle}
+    />
+    <Button
+      size="sm"
+      variant={mode.ripple ? "primary" : "ghost"}
+      icon="Waves"
+      ariaLabel="Ripple edits"
+      tooltip="Ripple: close the gap an edit leaves"
+      selected={mode.ripple}
+      onclick={() => {
+        mode.ripple = !mode.ripple;
+      }}
     />
     <Text
       as="span"

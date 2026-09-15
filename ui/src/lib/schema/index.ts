@@ -20,67 +20,67 @@ export class SurfaceApi {
 	 * along with its own viewport so the two coordinate spaces can be
 	 * checked against each other.
 	 */
-	setRect(x: number, y: number, width: number, height: number, page_width: number, page_height: number): Promise<void> {
-		return this.rpc.call("surface/set_rect", { x, y, width, height, page_width, page_height });
-	}
+	setStage = (x: number, y: number, width: number, height: number, page_width: number, page_height: number): Promise<void> => {
+		return this.rpc.call("surface/set_stage", { x, y, width, height, page_width, page_height });
+	};
 
 	/**
 	 * What to clear the surface to, so the area around the letterboxed
 	 * video matches the chrome.
 	 */
-	setChrome(r: number, g: number, b: number): Promise<void> {
+	setChrome = (r: number, g: number, b: number): Promise<void> => {
 		return this.rpc.call("surface/set_chrome", { r, g, b });
-	}
+	};
 
 	/** Frame counters, for the readout. */
-	stats(): Promise<StatsDto> {
+	stats = (): Promise<StatsDto> => {
 		return this.rpc.call("surface/stats");
-	}
+	};
 }
 
 export class TimelineApi {
 	constructor(private rpc: Rpc) {}
 
 	/** The document as it currently stands, or nothing before one opens. */
-	get(): Promise<TimelineDto | null> {
+	get = (): Promise<TimelineDto | null> => {
 		return this.rpc.call("timeline/get");
-	}
+	};
 }
 
 export class TransportApi {
 	constructor(private rpc: Rpc) {}
 
 	/** Where the playhead is, and whether it is moving. */
-	state(): Promise<TransportDto> {
+	state = (): Promise<TransportDto> => {
 		return this.rpc.call("transport/state");
-	}
+	};
 
 	/** Move the playhead to `frame`. */
-	seek(frame: number): Promise<void> {
+	seek = (frame: number): Promise<void> => {
 		return this.rpc.call("transport/seek", { frame });
-	}
+	};
 
 	/** Start or stop playback. */
-	toggle(): Promise<void> {
+	toggle = (): Promise<void> => {
 		return this.rpc.call("transport/toggle");
-	}
+	};
 }
 
 /** Pushed when the document changes, so the canvas never has to poll for it. */
 export class TimelineEvents {
 	constructor(private rpc: Rpc) {}
 
-	onChanged(handler: (payload: TimelineDto) => void): UnlistenFn {
+	onChanged = (handler: (payload: TimelineDto) => void): UnlistenFn => {
 		return this.rpc.listen<TimelineDto>("timeline/changed", handler);
-	}
+	};
 }
 
 export class TransportEvents {
 	constructor(private rpc: Rpc) {}
 
-	onChanged(handler: (payload: TransportDto) => void): UnlistenFn {
+	onChanged = (handler: (payload: TransportDto) => void): UnlistenFn => {
 		return this.rpc.listen<TransportDto>("transport/changed", handler);
-	}
+	};
 }
 
 export class Api {

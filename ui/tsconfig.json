@@ -4,7 +4,11 @@
     "target": "ES2022",
     "moduleResolution": "bundler",
     "verbatimModuleSyntax": true,
-    "strict": true
+    "strict": true,
+    "paths": {
+      "$lib/*": ["./src/lib/*"],
+      "$components/*": ["./src/components/*"]
+    }
   },
   "include": [
     "src/**/*.ts",

@@ -1,0 +1,30 @@
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#app {
+  background: transparent !important;
+}
+
+html, body { margin: 0; height: 100%; }
+
+body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+#app > :global(*) {
+  display: contents;
+}

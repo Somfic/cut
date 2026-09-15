@@ -10,6 +10,8 @@ export default defineConfig({
   plugins: [svelte()],
   resolve: {
     alias: {
+      $lib: fileURLToPath(new URL('./src/lib', import.meta.url)),
+      $components: fileURLToPath(new URL('./src/components', import.meta.url)),
       // Glow ships SvelteKit source; this is the only bit of the framework it
       // actually reaches for.
       '$app/navigation': fileURLToPath(new URL('./src/shims/app-navigation.ts', import.meta.url)),

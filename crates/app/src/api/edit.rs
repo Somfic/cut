@@ -44,15 +44,10 @@ pub struct TrimDto {
     pub frame: usize,
 }
 
-/// Changing the document.
+/// One method per `Edit`, each taking a set of clips.
 ///
-/// One method per `Edit`, and every one that acts on clips takes a set of
-/// them: a gesture over a selection is one edit, one set of checks and one
-/// step on the undo stack, whether it moved one clip or ten.
-///
-/// `Edit::Place` is deliberately absent — it exists for loading and pasting,
-/// which name a source window the user never types, and neither goes through
-/// the front end.
+/// `Edit::Place` is absent: it exists for loading and pasting, which name a
+/// source window the user never types.
 #[api(namespace = "edit")]
 pub trait EditApi {
     /// Probe a file and put the whole of it after everything already there.
@@ -178,11 +173,8 @@ fn source(path: &str) -> Result<Arc<Source>, String> {
         .map_err(|e| format!("could not open {path}: {e:#}"))
 }
 
-/// Carry out an edit and publish the result.
-///
 /// `applied` hands back the document the edit would leave, so a refusal never
-/// reaches the session — including the undo stack, which is only recorded once
-/// the edit is known to have worked.
+/// reaches the session — nor the undo stack.
 fn apply(state: &State, edit: Edit) -> Result<(), String> {
     change(state, false, edit)
 }
@@ -209,10 +201,8 @@ fn change(state: &State, continuing: bool, edit: Edit) -> Result<(), String> {
     Ok(())
 }
 
-/// Undo and redo differ only in which end of the history they take from.
-///
-/// Hands back the view recorded with the version, for the front end to return
-/// to, or nothing when there was no step to take.
+/// Undo and redo differ only in which end they take from. Hands back the view
+/// recorded with that version, or nothing when there was no step to take.
 fn step(
     state: &State,
     take: impl FnOnce(&mut History<Version>, Version) -> Option<Version>,
@@ -234,11 +224,9 @@ fn step(
     Some(there.view)
 }
 
-/// Tell both halves that the document moved: the canvas so it redraws, and
-/// playback so the frames keep matching what is on screen.
-///
-/// The timeline lock is released before this runs — playback's queue is the
-/// one place the two locks could otherwise be taken in the opposite order.
+/// Both halves: the canvas, so it redraws, and playback, so the frames keep
+/// matching. The timeline lock is released first — playback's queue is the one
+/// place the two could otherwise be taken in the opposite order.
 fn publish(state: &State, timeline: Arc<Timeline>) {
     if let Some(events) = state.events.get() {
         events
@@ -251,105 +239,6 @@ fn publish(state: &State, timeline: Arc<Timeline>) {
     }
 }
 
+#[path = "edit/tests.rs"]
 #[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-    use std::time::Duration;
-
-    use cut_engine::project::Edit;
-    use futures::executor::block_on;
-    use gstreamer::Fraction;
-
-    use super::*;
-
-    /// A document of three ten-second clips, with no file behind them: every
-    /// edit here is arithmetic on measurements, and probing a real video would
-    /// only make the test slower and machine-dependent.
-    fn session() -> Arc<State> {
-        let source = Arc::new(Source {
-            path: PathBuf::from("ten.mp4"),
-            duration: Duration::from_secs(10),
-            frame_rate: Fraction::new(30, 1),
-        });
-
-        let mut timeline = Timeline::default();
-        for i in 0..3 {
-            timeline
-                .apply(Edit::Place {
-                    track: 0,
-                    source: source.clone(),
-                    position: i * 300,
-                    source_start: 0,
-                    length: 300,
-                })
-                .unwrap();
-        }
-
-        let state = Arc::new(State::default());
-        *state.session.timeline.lock().unwrap() = Some(Arc::new(timeline));
-        state
-    }
-
-    fn clips(state: &State) -> Vec<(usize, usize)> {
-        let timeline = state.session.timeline.lock().unwrap().clone().unwrap();
-        timeline.tracks[0]
-            .clips
-            .iter()
-            .map(|c| (c.position, c.length))
-            .collect()
-    }
-
-    fn first(state: &State) -> u64 {
-        let timeline = state.session.timeline.lock().unwrap().clone().unwrap();
-        timeline.tracks[0].clips[0].id.raw()
-    }
-
-    #[test]
-    fn split_then_undo_restores_the_document() {
-        let state = session();
-        let before = clips(&state);
-
-        block_on(state.split(vec![first(&state)], 150)).unwrap();
-        assert_eq!(clips(&state)[..2], [(0, 150), (150, 150)]);
-
-        assert!(block_on(state.undo()).is_some());
-        assert_eq!(clips(&state), before);
-
-        assert!(block_on(state.redo()).is_some());
-        assert_eq!(clips(&state)[..2], [(0, 150), (150, 150)]);
-    }
-
-    #[test]
-    fn a_ripple_delete_closes_the_gap() {
-        let state = session();
-
-        block_on(state.delete(vec![first(&state)], true)).unwrap();
-        assert_eq!(clips(&state), [(0, 300), (300, 300)]);
-
-        assert!(block_on(state.undo()).is_some());
-        assert_eq!(clips(&state), [(0, 300), (300, 300), (600, 300)]);
-    }
-
-    #[test]
-    fn a_refused_edit_changes_nothing() {
-        let state = session();
-        let before = clips(&state);
-
-        // Past the end of a ten-second source: the engine refuses it.
-        let refused = block_on(state.trim(vec![TrimDto {
-            clip: first(&state),
-            edge: EdgeDto::Out,
-            frame: 5_000,
-        }]));
-        assert!(refused.is_err());
-        assert_eq!(clips(&state), before);
-
-        // And nothing was recorded, so there is nothing to undo back to.
-        assert!(block_on(state.undo()).is_none());
-    }
-
-    #[test]
-    fn undo_on_an_untouched_document_says_so() {
-        assert!(block_on(session().undo()).is_none());
-    }
-}
+mod tests;

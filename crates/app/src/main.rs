@@ -62,7 +62,7 @@ fn main() -> anyhow::Result<()> {
 
     // repaint on resize
     {
-        let (gpu, shared) = (gpu.clone(), state.clone());
+        let (gpu, shared, watched) = (gpu.clone(), state.clone(), window.clone());
         window.on_window_event(move |event| {
             if let WindowEvent::Resized(size) = event {
                 if let Err(e) = webview.set_size(*size) {
@@ -73,6 +73,15 @@ fn main() -> anyhow::Result<()> {
                 {
                     eprintln!("present during resize failed: {e:#}");
                 }
+
+                // Going fullscreen is a resize, and it is what decides
+                // whether the page leaves room for the traffic lights.
+                api::window::publish(
+                    &shared,
+                    api::window::WindowDto {
+                        fullscreen: watched.is_fullscreen().unwrap_or(false),
+                    },
+                );
             }
         });
     }
@@ -105,17 +114,10 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The macOS menu bar.
-///
-/// Tauri installs a default one when an app sets none, and its Edit submenu
-/// claims ⌘Z and ⇧⌘Z for AppKit's own undo. A key equivalent is matched
-/// before the key ever reaches the webview, so the page never saw them: the
-/// in-window menu bar advertised the shortcuts and only its rows worked.
-///
-/// So this is that default menu minus the items whose keys the app answers
-/// itself — undo and redo live in the document, not in the responder chain.
-/// The clipboard items stay: they are what makes ⌘C and ⌘V work in a text
-/// field, and nothing in the app wants those keys.
+/// Tauri's default menu bar, minus the items whose keys the app answers
+/// itself: its Edit submenu claims ⌘Z for AppKit's own undo, and a key
+/// equivalent is matched before the webview ever sees it. The clipboard items
+/// stay — they are what makes ⌘C work in a text field.
 fn menu(handle: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let app = Submenu::with_items(
         handle,

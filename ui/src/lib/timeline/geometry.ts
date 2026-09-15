@@ -1,8 +1,7 @@
 // Where the document lands on screen, and what the pointer is over.
 //
-// Feedback only: the engine re-checks every edit in `Timeline::apply`, so a
-// wrong answer here makes an edit bounce rather than corrupt anything. It
-// lives in the front end because a drag needs it at pointer rate.
+// Feedback only: the engine re-checks every edit, so a wrong answer here
+// bounces an edit rather than corrupting anything.
 
 export const RULER_HEIGHT = 26;
 export const TRACK_HEIGHT = 54;
@@ -18,7 +17,7 @@ export const MAX_ZOOM = 40;
 
 export type Edge = "in" | "out";
 
-import type { ClipDto, TimelineDto, TrackDto } from "./schema";
+import type { ClipDto, TimelineDto, TrackDto } from "../schema";
 
 export type Clip = ClipDto;
 export type Track = TrackDto;
@@ -45,14 +44,18 @@ export function trackAt(y: number): number | null {
   return y >= topOf(track) ? track : null;
 }
 
-export const end = (clip: Clip) => clip.position + clip.length;
+export type Span = { position: number; length: number };
 
-/** Whether `frame` is one of the frames a clip covers. */
-export const inside = (clip: Clip, frame: number) =>
-  frame >= clip.position && frame < end(clip);
+export const end = (span: Span) => span.position + span.length;
+
+export const covers = (span: Span, frame: number) =>
+  frame >= span.position && frame < end(span);
+
+export const overlaps = (a: Span, b: Span) =>
+  a.position < end(b) && b.position < end(a);
 
 export const clipAt = (track: Track, frame: number) =>
-  track.clips.find((clip) => inside(clip, frame));
+  track.clips.find((clip) => covers(clip, frame));
 
 export function locate(timeline: Timeline, id: number) {
   for (const [track, lane] of timeline.tracks.entries()) {
@@ -107,15 +110,11 @@ export function hit(
 }
 
 /**
- * Every frame a gesture could land flush against, sorted.
+ * Every frame a gesture could land flush against, sorted, from every track:
+ * clips are cut against each other across lanes as much as along them.
  *
- * Every track, not just the one being dragged in: clips are cut against each
- * other across lanes as much as along them, and an edge that lines up with
- * the track above is exactly the one worth catching.
- *
- * Built once when a drag starts — the document cannot change under it, and
- * rebuilding an eight-hundred-edge list at pointer rate was the most
- * expensive thing a drag did.
+ * Built once per drag — rebuilding it at pointer rate was the most expensive
+ * thing a drag did.
  */
 export function snapCandidates(
   timeline: Timeline,
@@ -137,15 +136,9 @@ export function snapCandidates(
 export type Snap = { pull: number; at: number | null };
 
 /**
- * How far to pull a gesture so that one of the edges it carries lands flush
- * on something that is staying put.
- *
- * Every carried edge is a candidate, not just the grabbed clip's: with three
- * clips selected, the one whose end meets the next clip is usually the one
- * the eye is on, and a drag that snapped only by the clip under the pointer
- * would slide the other two through their own alignments. The nearest match
- * wins, and `at` is what it caught — which is what the dashed line on the
- * canvas is drawn from.
+ * How far to pull a gesture so an edge it carries lands flush on one staying
+ * put. Every carried edge counts, not just the grabbed clip's: snapping by
+ * the clip under the pointer slides the rest through their own alignments.
  */
 export function snapDelta(
   candidates: number[],
@@ -164,12 +157,10 @@ export function snapDelta(
   };
 
   for (const frame of moving) {
-    // The playhead is the one candidate that moves while a drag is happening,
-    // so it is offered live rather than baked into the sorted list.
+    // The one candidate that moves during a drag, so it is offered live.
     offer(playhead, frame);
 
-    // Sorted, so the search starts at the neighbours either side of this edge
-    // and stops as soon as it is out of reach.
+    // Sorted, so this starts at the nearest edge and stops out of reach.
     for (let i = nearest(candidates, frame); i < candidates.length; i++) {
       if (candidates[i] - frame > tolerance) break;
       offer(candidates[i], frame);
@@ -195,37 +186,26 @@ function nearest(edges: number[], frame: number): number {
 }
 
 /** Where a clip would sit once a drag lands. */
-export type Placement = {
-  id: number;
-  track: number;
-  position: number;
-  length: number;
-};
+/** Where a clip sits, or would sit once a drag lands. */
+export type Placement = Span & { id: number; track: number };
 
-/**
- * The spans a drop would take off the clips it lands on.
- *
- * Dropping a clip over another shortens the one underneath rather than being
- * refused, so this is what a drag can show before it happens: the frames
- * that would stop being played, over the clips that would lose them.
- */
+/** The spans a drop would take off the clips it lands on. */
 export function covered(timeline: Timeline, group: Placement[]): Placement[] {
   const moving = new Set(group.map((p) => p.id));
   const eaten: Placement[] = [];
 
   for (const p of group) {
-    const to = p.position + p.length;
-
     for (const clip of timeline.tracks[p.track]?.clips ?? []) {
-      if (clip.position >= to) break;
-      if (moving.has(clip.id) || end(clip) <= p.position) continue;
+      // Sorted, so once a clip starts past the span nothing else can overlap.
+      if (clip.position >= end(p)) break;
+      if (moving.has(clip.id) || !overlaps(clip, p)) continue;
 
       const from = Math.max(clip.position, p.position);
       eaten.push({
         id: clip.id,
         track: p.track,
         position: from,
-        length: Math.min(end(clip), to) - from,
+        length: Math.min(end(clip), end(p)) - from,
       });
     }
   }
@@ -234,13 +214,9 @@ export function covered(timeline: Timeline, group: Placement[]): Placement[] {
 }
 
 /**
- * How far a trim can go: not past the end that isn't moving, and not past
- * what the source has.
- *
- * Neighbours are not walls — a clip growing into one shortens it, the same
- * rule a drop follows — so the only limits left are the media's own. Which
- * matters most in a document with no gaps in it, where otherwise every handle
- * would be pinned the moment it was grabbed.
+ * How far a trim can go: its own end, and what the source has. Neighbours are
+ * not walls — growing into one shortens it, as a drop does — which is what
+ * lets a handle move at all in a document with no gaps in it.
  */
 export function trimRange(
   timeline: Timeline,
@@ -258,4 +234,19 @@ export function trimRange(
   return edge === "in"
     ? [Math.max(0, clip.position - clip.source_start), anchor - 1]
     : [anchor + 1, clip.position + spare];
+}
+
+export function timecode(
+  frame: number,
+  fps: number,
+): { minutes: number; seconds: number; subseconds: number } {
+  const total = Math.max(0, frame);
+  const subseconds = Math.floor(total % fps);
+  const seconds = Math.floor(total / fps);
+
+  return {
+    minutes: Math.floor(seconds / 60),
+    seconds: seconds % 60,
+    subseconds,
+  };
 }

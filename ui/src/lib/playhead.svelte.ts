@@ -1,0 +1,86 @@
+import api from "./api";
+
+class Playhead {
+  frame = $state(0);
+  /**
+   * The same position unrounded, for drawing: at a high zoom a frame is forty
+   * pixels, and stepping between them crawls. `frame` is what edits count in.
+   */
+  exact = $state(0);
+  playing = $state(false);
+  fps = $state(24);
+
+  #base = 0;
+  #since = performance.now();
+
+  /** Where a scrub put it, and how long to believe that over the engine. */
+  #asked: { frame: number; until: number } | null = null;
+
+  /** How long the engine is given to catch up with a scrub. */
+  static #PATIENCE = 1000;
+
+  /** Fold in what Rust says. */
+  sync(t: { playhead: number; playing: boolean; fps: number }) {
+    this.fps = t.fps;
+    this.playing = t.playing;
+
+    // Seeking is asynchronous: until playback moves it keeps answering with
+    // where it still is, which throws a scrub back a frame at a time.
+    if (this.#asked) {
+      const arrived = Math.abs(t.playhead - this.#asked.frame) <= 2;
+      if (!arrived && performance.now() < this.#asked.until) return;
+
+      this.#asked = null;
+    }
+
+    this.#base = t.playhead;
+    this.#since = performance.now();
+    this.frame = t.playhead;
+    this.exact = t.playhead;
+  }
+
+  /**
+   * Where the user just dragged it, before the engine has answered. Each call
+   * renews the claim, so a drag holds the playhead for as long as it lasts —
+   * no start and end to keep in step with.
+   */
+  scrub(frame: number) {
+    this.#asked = { frame, until: performance.now() + Playhead.#PATIENCE };
+    this.#base = frame;
+    this.#since = performance.now();
+    this.frame = frame;
+    this.exact = frame;
+  }
+
+  /** Advance to now. Call once per animation frame. */
+  tick() {
+    if (!this.playing) return;
+
+    const elapsed = (performance.now() - this.#since) / 1000;
+    const at = this.#base + elapsed * this.fps;
+
+    this.exact = at;
+    this.frame = Math.floor(at);
+  }
+}
+
+/**
+ * Started once, here: the clock has to run whether or not anything is
+ * watching it, and every correction the engine pushes lands in one place.
+ */
+function live(): Playhead {
+  const playhead = new Playhead();
+
+  api.transport.state().then((t) => playhead.sync(t));
+  api.transportEvents.onChanged((t) => playhead.sync(t));
+
+  const tick = () => {
+    playhead.tick();
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+
+  return playhead;
+}
+
+export const playhead = live();

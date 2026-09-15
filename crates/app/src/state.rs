@@ -6,6 +6,7 @@ use cut_engine::playback::Controls;
 use cut_engine::project::{History, Timeline};
 
 use crate::api::view::ViewDto;
+use crate::api::window::WindowDto;
 
 #[derive(Default)]
 pub struct State {
@@ -14,6 +15,8 @@ pub struct State {
     pub session: Session,
     pub counters: Counters,
     pub events: OnceLock<crate::generated::Events>,
+    /// What the window is doing, so a change can be told from a repeat.
+    pub window: Mutex<WindowDto>,
 }
 
 #[derive(Default)]

@@ -3,23 +3,15 @@ use std::sync::Arc;
 use crate::media::Source;
 use crate::project::ClipId;
 
-/// A change to the document.
+/// A change to the document, and so the list of what editing can do.
 ///
-/// `Timeline::apply` is the only thing that carries one out, so this is also
-/// the list of what editing can do — and the one place to add to when it can
-/// do more.
+/// Every edit names a set of clips, even a set of one: a gesture is one thing
+/// the user did, and three edits would refuse arrangements that are legal as
+/// a group and leave three steps on the undo stack.
 ///
-/// Every edit that acts on clips names a set of them, even when there is only
-/// one: a gesture over three clips is one thing the user did, and splitting it
-/// into three edits would refuse arrangements that are legal as a group (a
-/// clip cannot land where its neighbour is until that neighbour has moved) and
-/// leave three entries on the undo stack for one action.
-///
-/// Moving and trimming overwrite what they land on, shortening it or taking it
-/// away — a gesture the user made deliberately is not something to refuse, and
-/// a trim only narrows a window into a source, so undo gives the frames back.
-/// Only `Place` refuses, because a project file that says two clips share the
-/// same frames is a file that is wrong.
+/// Moving and trimming overwrite what they land on — a trim only narrows a
+/// window into a source, so undo gives the frames back. Only `Place` refuses,
+/// because a file saying two clips share frames is a file that is wrong.
 #[derive(Clone)]
 pub enum Edit {
     /// Put an exact window of a source on a track. What loading a project and

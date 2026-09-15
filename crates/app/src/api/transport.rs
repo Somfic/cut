@@ -40,9 +40,8 @@ impl TransportApi for Arc<State> {
         }
 
         // The frame asked for, not the one playback is still showing: the
-        // request is queued for the decode thread, so reading the engine back
-        // here would answer with where the playhead was before the seek — and
-        // a scrub would trail the pointer by however long the queue takes.
+        // request is queued, so reading the engine back would answer with
+        // where the playhead was before the seek.
         announce(
             self,
             TransportDto {
@@ -64,10 +63,8 @@ impl TransportApi for Arc<State> {
             }
         };
 
-        // Likewise: the engine flips its own flag when it picks the request
-        // up, so what it would say now is what it was doing a moment ago. The
-        // front end runs a clock of its own between corrections, and one
-        // stale `playing` keeps it running after a pause.
+        // Likewise: the engine flips its flag when it picks the request up,
+        // and the front end's clock keeps running on a stale `playing`.
         announce(
             self,
             TransportDto {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import api from "./api.svelte";
+  import api from "$lib/api";
 
   let stage: HTMLDivElement;
 

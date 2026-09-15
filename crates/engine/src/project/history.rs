@@ -38,12 +38,8 @@ impl<T> History<T> {
     }
 
     /// Fold what is about to be published into the version already recorded,
-    /// rather than stacking another one.
-    ///
-    /// For a gesture that arrives as a run of edits — a held arrow key, where
-    /// every repeat moves the clips again — so that undo takes back the whole
-    /// hold rather than one keyboard repeat of it. False when there is
-    /// nothing recorded to fold into, which is the caller's cue to record.
+    /// for a gesture that arrives as a run of edits — a held arrow key. False
+    /// when there is nothing to fold into, which is the cue to record.
     pub fn amend(&mut self) -> bool {
         if self.past.is_empty() {
             return false;

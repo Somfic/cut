@@ -85,6 +85,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-trait"
+version = "0.1.92"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82f6aeea286b8eb4dd3431a1be1b59d290ace00f5bfd8e2a159bc2a05e2c1667"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
+]
+
+[[package]]
 name = "atk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -614,8 +625,10 @@ name = "cut"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "cut-engine",
  "cut-render",
+ "draad",
  "futures",
  "serde",
  "tauri",
@@ -868,6 +881,39 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "draad"
+version = "0.3.0"
+source = "git+https://github.com/somfic/draad#cb07cecb3ce55b4d6d417572137f11cd67e0870e"
+dependencies = [
+ "draad-codegen",
+ "draad-macros",
+ "serde",
+ "tauri",
+]
+
+[[package]]
+name = "draad-codegen"
+version = "0.3.0"
+source = "git+https://github.com/somfic/draad#cb07cecb3ce55b4d6d417572137f11cd67e0870e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "draad-macros"
+version = "0.3.0"
+source = "git+https://github.com/somfic/draad#cb07cecb3ce55b4d6d417572137f11cd67e0870e"
+dependencies = [
+ "draad-codegen",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

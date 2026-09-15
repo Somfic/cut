@@ -1,7 +1,7 @@
 //! A web front end over a native video surface: wgpu draws frames into the
 //! window, and a transparent webview sits on top holding the UI.
 
-mod commands;
+mod api;
 mod decode;
 mod gpu;
 mod state;
@@ -13,6 +13,10 @@ use tauri::window::WindowBuilder;
 use tauri::{PhysicalPosition, RunEvent, WebviewUrl, WindowEvent};
 
 use state::Shared;
+
+// Scans `src/api`, emits the tauri commands here and the typed client into
+// `ui/src/lib/schema/index.ts`.
+draad::include_generated!(std::sync::Arc<crate::state::Shared>, client_dir = "ui/src/lib/schema");
 
 /// Where a save goes when the command line does not say.
 const DEFAULT_PROJECT: &str = "project.cut";
@@ -29,15 +33,7 @@ fn main() -> anyhow::Result<()> {
 
     let app = tauri::Builder::default()
         .manage(shared.clone())
-        .invoke_handler(tauri::generate_handler![
-            commands::stats,
-            commands::toggle_playback,
-            commands::set_video_rect,
-            commands::set_chrome,
-            commands::timeline,
-            commands::transport,
-            commands::seek
-        ])
+        .invoke_handler(invoke_handler())
         .build(tauri::generate_context!())?;
 
     let window = WindowBuilder::new(&app, "main")

@@ -18,18 +18,11 @@ export const MAX_ZOOM = 40
 
 export type Edge = 'in' | 'out'
 
-export type Clip = {
-  id: number
-  position: number
-  length: number
-  sourceStart: number
-  /** Frames the source has in total, which is how far a trim can reach. */
-  sourceLength: number
-  name: string
-}
+import type { ClipDto, TimelineDto, TrackDto } from './schema'
 
-export type Track = { clips: Clip[] }
-export type Timeline = { tracks: Track[]; length: number }
+export type Clip = ClipDto
+export type Track = TrackDto
+export type Timeline = TimelineDto
 
 /** Which part of the document is on screen, and how big it is drawn. */
 export type Viewport = { scroll: number; zoom: number }
@@ -155,10 +148,10 @@ export function trimRange(
   if (!found) return null
 
   const { clip } = found
-  const spare = Math.max(0, clip.sourceLength - clip.sourceStart)
+  const spare = Math.max(0, clip.source_length - clip.source_start)
   const [before, after] = neighbours(timeline, track, id)
 
   return edge === 'in'
-    ? [Math.max(before, Math.max(0, clip.position - clip.sourceStart)), anchor - 1]
+    ? [Math.max(before, Math.max(0, clip.position - clip.source_start)), anchor - 1]
     : [anchor + 1, Math.min(after, clip.position + spare)]
 }

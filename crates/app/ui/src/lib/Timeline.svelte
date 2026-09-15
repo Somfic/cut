@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { TimelineDto } from './engine.svelte'
-  import { seek } from './engine.svelte'
+  import { api } from './engine.svelte'
   import {
     MAX_ZOOM, MIN_ZOOM, RULER_HEIGHT, TRACK_GAP, TRACK_HEIGHT,
     frameAt as frameAtIn, topOf, xOf as xOfIn, type Viewport,
@@ -160,11 +160,11 @@
 
   function onPointerDown(event: PointerEvent) {
     canvas.setPointerCapture(event.pointerId)
-    seek(frameAt(event.offsetX))
+    api.transport.seek(frameAt(event.offsetX))
   }
 
   function onPointerMove(event: PointerEvent) {
-    if (event.buttons & 1) seek(frameAt(event.offsetX))
+    if (event.buttons & 1) api.transport.seek(frameAt(event.offsetX))
   }
 </script>
 

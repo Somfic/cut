@@ -4,15 +4,8 @@
   import Stage from "./lib/Stage.svelte";
   import Timeline from "./lib/Timeline.svelte";
   import {
-    Playhead,
-    getStats,
-    getTimeline,
-    getTransport,
-    syncChrome,
-    timecode,
-    togglePlayback,
-    type Stats,
-    type TimelineDto,
+    Playhead, api, syncChrome, timecode, togglePlayback,
+    type StatsDto, type TimelineDto,
   } from "./lib/engine.svelte";
 
   const playhead = new Playhead();
@@ -24,12 +17,12 @@
   // frame is predicted. Only the corrections go over IPC, twice a second.
   $effect(() => {
     let running = true;
-    let last: Stats | null = null;
+    let last: StatsDto | null = null;
     let since = performance.now();
     let uiFrames = 0;
 
     syncChrome();
-    getTimeline().then((t) => (timeline = t));
+    api.timeline.get().then((t) => (timeline = t));
 
     const frame = () => {
       if (!running) return;
@@ -43,7 +36,7 @@
         uiFrames = 0;
         since = now;
 
-        Promise.all([getTransport(), getStats()])
+        Promise.all([api.transport.state(), api.surface.stats()])
           .then(([t, s]) => {
             playhead.sync(t);
 

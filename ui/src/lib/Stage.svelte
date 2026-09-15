@@ -1,28 +1,45 @@
 <script lang="ts">
-  import { setVideoRect } from './engine.svelte'
+  import api from "./api.svelte";
 
-  // The hole: it reserves the rect and stays transparent. Anything painted
-  // here would cover the video surface behind it.
-  let hole: HTMLDivElement
+  let stage: HTMLDivElement;
+
+  function report() {
+    const rect = stage.getBoundingClientRect();
+    const scale = window.devicePixelRatio;
+
+    return api.surface.setStage(
+      rect.x * scale,
+      rect.y * scale,
+      rect.width * scale,
+      rect.height * scale,
+      window.innerWidth * scale,
+      window.innerHeight * scale,
+    );
+  }
 
   $effect(() => {
-    const report = () => setVideoRect(hole)
-    const observer = new ResizeObserver(report)
+    // when the window resizes
+    window.addEventListener("resize", report);
 
-    observer.observe(hole)
-    // The rect moves when anything above it resizes, not only the hole.
-    window.addEventListener('resize', report)
-    report()
+    // when the element resizes
+    const observer = new ResizeObserver(report);
+    observer.observe(stage);
+
+    // once on mount
+    report();
 
     return () => {
-      observer.disconnect()
-      window.removeEventListener('resize', report)
-    }
-  })
+      observer.disconnect();
+      window.removeEventListener("resize", report);
+    };
+  });
 </script>
 
-<div class="stage" bind:this={hole}></div>
+<div class="stage" bind:this={stage}></div>
 
-<style>
-  .stage { flex: 1; min-height: 0; }
+<style lang="scss">
+  .stage {
+    flex: 1;
+    min-height: 0;
+  }
 </style>

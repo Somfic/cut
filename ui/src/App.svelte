@@ -3,10 +3,12 @@
   import Titlebar from "./lib/Titlebar.svelte";
   import Stage from "./lib/Stage.svelte";
   import Timeline from "./lib/Timeline.svelte";
-  import {
-    Playhead, api, syncChrome, timecode, togglePlayback,
-    type StatsDto, type TimelineDto,
-  } from "./lib/engine.svelte";
+  import api, {
+    Playhead,
+    timecode,
+    type StatsDto,
+    type TimelineDto,
+  } from "./lib/api.svelte";
 
   const playhead = new Playhead();
 
@@ -16,8 +18,6 @@
   // The document and the playhead's basis are pushed, so nothing polls for
   // them. `get`/`state` are only the initial fetch, before the first event.
   $effect(() => {
-    syncChrome();
-
     api.timeline.get().then((t) => (timeline = t));
     api.transport.state().then((t) => playhead.sync(t));
 
@@ -82,7 +82,7 @@
       variant="ghost"
       icon={playhead.playing ? "Pause" : "Play"}
       label={playhead.playing ? "Pause" : "Play"}
-      onclick={togglePlayback}
+      onclick={api.transport.toggle}
     />
     <Text
       as="span"

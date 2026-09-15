@@ -18,7 +18,7 @@ pub trait SurfaceApi {
     /// Where the page has left room for the video, in physical pixels,
     /// along with its own viewport so the two coordinate spaces can be
     /// checked against each other.
-    async fn set_rect(
+    async fn set_stage(
         &self,
         x: f32,
         y: f32,
@@ -38,7 +38,7 @@ pub trait SurfaceApi {
 
 #[api]
 impl SurfaceApi for Arc<State> {
-    async fn set_rect(
+    async fn set_stage(
         &self,
         x: f32,
         y: f32,
@@ -47,7 +47,12 @@ impl SurfaceApi for Arc<State> {
         page_width: f32,
         page_height: f32,
     ) {
-        *self.surface.rect.lock().unwrap() = Some(Rect { x, y, width, height });
+        *self.surface.rect.lock().unwrap() = Some(Rect {
+            x,
+            y,
+            width,
+            height,
+        });
         *self.surface.page.lock().unwrap() = Some((page_width, page_height));
     }
 

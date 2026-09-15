@@ -37,6 +37,30 @@ pub enum Edit {
         edge: Edge,
         frame: usize,
     },
+    /// Move several clips by the same offset, as one edit.
+    ///
+    /// Not a `Move` each: a group that shuffles within its own span would be
+    /// refused by the room it is itself about to vacate, and a half-applied
+    /// group is a document nobody asked for. Every clip here is lifted out
+    /// before any is put down, and the whole thing lands or none of it does.
+    Nudge {
+        clips: Vec<ClipId>,
+        frames: isize,
+        /// How many lanes down, negative for up.
+        tracks: isize,
+        /// What to do about whatever is already where the group lands:
+        /// shorten it to make room, or refuse the move. Overwriting takes
+        /// no frames away that a trim could not give back, except from a
+        /// clip covered end to end, which has nothing left to show.
+        overwrite: bool,
+    },
+    /// Move the same end of several clips by the same offset, as one edit.
+    /// `Trim` for a group, with the same all-or-nothing rule as `Nudge`.
+    Stretch {
+        clips: Vec<ClipId>,
+        edge: Edge,
+        frames: isize,
+    },
     /// Cut a clip in two at `frame`.
     Split { clip: ClipId, frame: usize },
     /// Remove a clip, either leaving the gap it held or closing it.

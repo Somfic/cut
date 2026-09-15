@@ -90,63 +90,20 @@ impl Timeline {
                 self.insert(track, moved);
             }
 
-            Edit::Trim { clip, edge, frame } => {
-                let (t, index) = self.locate(clip)?;
-                let trimmed = &self.tracks[t].clips[index];
-                let available = trimmed.source.frame_count();
+            Edit::Trim { clip, edge, frame } => self.trim(clip, edge, frame)?,
 
-                let (position, source_start, length) = match edge {
-                    Edge::In => {
-                        if frame >= trimmed.end() {
-                            bail!("an in-point has to come before its out-point");
-                        }
+            Edit::Nudge {
+                clips,
+                frames,
+                tracks,
+                overwrite,
+            } => self.nudge(&clips, frames, tracks, overwrite)?,
 
-                        // The window into the source moves with the in-point;
-                        // the out-point stays where it is. These two have to
-                        // move together or the clip plays the wrong frames.
-                        let shift = frame as isize - trimmed.position as isize;
-                        let source_start = trimmed.source_start as isize + shift;
-
-                        if source_start < 0 {
-                            bail!(
-                                "{} has no frames before its start",
-                                trimmed.source.path.display()
-                            );
-                        }
-
-                        (frame, source_start as usize, trimmed.end() - frame)
-                    }
-                    Edge::Out => {
-                        if frame <= trimmed.position {
-                            bail!("an out-point has to come after its in-point");
-                        }
-
-                        let length = frame - trimmed.position;
-
-                        if trimmed.source_start + length > available {
-                            bail!(
-                                "{} runs out after {} more frames",
-                                trimmed.source.path.display(),
-                                available - trimmed.source_start
-                            );
-                        }
-
-                        (trimmed.position, trimmed.source_start, length)
-                    }
-                };
-
-                if let Some(over) = self.covering(t, position, length, Some(clip)) {
-                    bail!("that would run into the clip at frame {over}");
-                }
-
-                let trimmed = &mut self.tracks[t].clips[index];
-                trimmed.position = position;
-                trimmed.source_start = source_start;
-                trimmed.length = length;
-
-                // Trimming the in-point moves the clip, which can reorder it.
-                self.tracks[t].clips.sort_by_key(|clip| clip.position);
-            }
+            Edit::Stretch {
+                clips,
+                edge,
+                frames,
+            } => self.stretch(&clips, edge, frames)?,
 
             Edit::Split { clip, frame } => {
                 let (t, index) = self.locate(clip)?;
@@ -208,7 +165,8 @@ impl Timeline {
     /// running into anything — what a drag has to know before it lands, asked
     /// of the document so the answer cannot drift from what `apply` allows.
     pub fn has_room(&self, track: usize, position: usize, length: usize, ignore: ClipId) -> bool {
-        self.covering(track, position, length, Some(ignore)).is_none()
+        self.covering(track, position, length, Some(ignore))
+            .is_none()
     }
 
     /// The first frame at or after `frame` that a clip covers, wrapping round to
@@ -244,6 +202,199 @@ impl Timeline {
             .chain(edges)
             .min_by_key(|edge| edge.abs_diff(frame))
             .unwrap_or(0)
+    }
+
+    /// Move one end of one clip. The body of `Edit::Trim`, kept apart so a
+    /// group trim runs the same checks rather than a second copy of them.
+    fn trim(&mut self, clip: ClipId, edge: Edge, frame: usize) -> anyhow::Result<()> {
+        let (t, index) = self.locate(clip)?;
+        let trimmed = &self.tracks[t].clips[index];
+        let available = trimmed.source.frame_count();
+
+        let (position, source_start, length) = match edge {
+            Edge::In => {
+                if frame >= trimmed.end() {
+                    bail!("an in-point has to come before its out-point");
+                }
+
+                // The window into the source moves with the in-point;
+                // the out-point stays where it is. These two have to
+                // move together or the clip plays the wrong frames.
+                let shift = frame as isize - trimmed.position as isize;
+                let source_start = trimmed.source_start as isize + shift;
+
+                if source_start < 0 {
+                    bail!(
+                        "{} has no frames before its start",
+                        trimmed.source.path.display()
+                    );
+                }
+
+                (frame, source_start as usize, trimmed.end() - frame)
+            }
+            Edge::Out => {
+                if frame <= trimmed.position {
+                    bail!("an out-point has to come after its in-point");
+                }
+
+                let length = frame - trimmed.position;
+
+                if trimmed.source_start + length > available {
+                    bail!(
+                        "{} runs out after {} more frames",
+                        trimmed.source.path.display(),
+                        available - trimmed.source_start
+                    );
+                }
+
+                (trimmed.position, trimmed.source_start, length)
+            }
+        };
+
+        if let Some(over) = self.covering(t, position, length, Some(clip)) {
+            bail!("that would run into the clip at frame {over}");
+        }
+
+        let trimmed = &mut self.tracks[t].clips[index];
+        trimmed.position = position;
+        trimmed.source_start = source_start;
+        trimmed.length = length;
+
+        // Trimming the in-point moves the clip, which can reorder it.
+        self.tracks[t].clips.sort_by_key(|clip| clip.position);
+
+        Ok(())
+    }
+
+    /// Make room between `from` and `to` on `track` by shortening whatever is
+    /// already there.
+    ///
+    /// The overwrite rule, and the one place it is spelled out: a clip the
+    /// span covers at one end is trimmed back to meet it, one covered down
+    /// the middle is split around it, and one covered end to end is removed —
+    /// there is nothing left of it to keep. A trim only narrows the window
+    /// into a source, so undoing any of this gives the frames back.
+    fn clear_span(&mut self, track: usize, from: usize, to: usize) -> anyhow::Result<()> {
+        let Some(lane) = self.tracks.get(track) else {
+            return Ok(());
+        };
+
+        // Read the overlaps out first: every branch below reshapes the track.
+        let overlapping: Vec<(ClipId, usize, usize)> = lane
+            .clips
+            .iter()
+            .filter(|clip| clip.position < to && from < clip.end())
+            .map(|clip| (clip.id, clip.position, clip.end()))
+            .collect();
+
+        for (id, position, end) in overlapping {
+            match (position < from, end > to) {
+                // Covered end to end.
+                (false, false) => {
+                    let (t, index) = self.locate(id)?;
+                    self.tracks[t].clips.remove(index);
+                }
+                // Covered down the middle: a piece is left either side.
+                (true, true) => {
+                    self.apply(Edit::Split { clip: id, frame: from })?;
+
+                    let (t, index) = self.locate(id)?;
+                    let tail = self.tracks[t].clips[index + 1].id;
+                    self.trim(tail, Edge::In, to)?;
+                }
+                // Covered at one end or the other.
+                (true, false) => self.trim(id, Edge::Out, from)?,
+                (false, true) => self.trim(id, Edge::In, to)?,
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Move a group of clips by the same offset.
+    ///
+    /// Worked out on a copy: the checks below only mean anything once every
+    /// clip in the group is out of the way, and an edit that cannot be
+    /// finished has to leave the document exactly as it was.
+    fn nudge(
+        &mut self,
+        clips: &[ClipId],
+        frames: isize,
+        tracks: isize,
+        overwrite: bool,
+    ) -> anyhow::Result<()> {
+        if clips.is_empty() {
+            return Ok(());
+        }
+
+        let mut next = self.clone();
+
+        let mut lifted = Vec::with_capacity(clips.len());
+        for &id in clips {
+            let (from, index) = next.locate(id)?;
+            let to = from as isize + tracks;
+            if to < 0 {
+                bail!("there is no track above track 0");
+            }
+
+            lifted.push((to as usize, next.tracks[from].clips.remove(index)));
+        }
+
+        for (track, mut clip) in lifted {
+            let position = clip.position as isize + frames;
+            if position < 0 {
+                bail!("that would start before the first frame");
+            }
+            let position = position as usize;
+
+            if track > next.tracks.len() {
+                bail!("there is no track {track}");
+            }
+
+            // The group is already lifted out, so what is in the way here is
+            // only ever a clip staying put — which is what makes it safe to
+            // shorten without checking whether it is one of the movers.
+            if overwrite {
+                next.clear_span(track, position, position + clip.length)?;
+            } else if let Some(over) = next.covering(track, position, clip.length, None) {
+                bail!("that would land on the clip at frame {over}");
+            }
+
+            clip.position = position;
+            next.insert(track, clip);
+        }
+
+        *self = next;
+        Ok(())
+    }
+
+    /// Move the same end of a group of clips by the same offset. Each one is
+    /// checked exactly as a lone trim would be, and one refusal drops the lot.
+    fn stretch(&mut self, clips: &[ClipId], edge: Edge, frames: isize) -> anyhow::Result<()> {
+        if clips.is_empty() {
+            return Ok(());
+        }
+
+        let mut next = self.clone();
+
+        for &id in clips {
+            let (t, index) = next.locate(id)?;
+            let clip = &next.tracks[t].clips[index];
+
+            let from = match edge {
+                Edge::In => clip.position,
+                Edge::Out => clip.end(),
+            };
+            let frame = from as isize + frames;
+            if frame < 0 {
+                bail!("that would start before the first frame");
+            }
+
+            next.trim(id, edge, frame as usize)?;
+        }
+
+        *self = next;
+        Ok(())
     }
 
     /// The one way a clip comes into the document, and so the one place an id
@@ -406,7 +557,11 @@ mod tests {
     }
 
     fn ids(timeline: &Timeline) -> Vec<ClipId> {
-        timeline.tracks[0].clips.iter().map(|clip| clip.id).collect()
+        timeline.tracks[0]
+            .clips
+            .iter()
+            .map(|clip| clip.id)
+            .collect()
     }
 
     /// Two clips, 60 frames then 30, back to back from frame zero.
@@ -416,6 +571,188 @@ mod tests {
         timeline.apply(Edit::Append(source(1))).unwrap();
 
         timeline
+    }
+
+    #[test]
+    fn a_group_moves_into_its_own_old_span() {
+        let mut timeline = pair();
+        let group = ids(&timeline);
+
+        // +30 puts the first clip exactly where the second one still is. One
+        // `Move` at a time could not do this; lifting both first can.
+        timeline
+            .apply(Edit::Nudge {
+                clips: group,
+                frames: 30,
+                tracks: 0,
+                overwrite: false,
+            })
+            .unwrap();
+
+        assert_eq!(windows(&timeline, 0), vec![(30, 0, 60), (90, 0, 30)]);
+    }
+
+    #[test]
+    fn a_group_move_onto_an_outsider_changes_nothing() {
+        let mut timeline = pair();
+        // A third clip at 90..120 that is not part of the group.
+        timeline.apply(Edit::Append(source(1))).unwrap();
+        let group = ids(&timeline)[..2].to_vec();
+        let before = windows(&timeline, 0);
+
+        let refused = timeline.apply(Edit::Nudge {
+            clips: group,
+            frames: 30,
+            tracks: 0,
+            overwrite: false,
+        });
+
+        assert!(refused.is_err());
+        assert_eq!(windows(&timeline, 0), before);
+    }
+
+    #[test]
+    fn a_group_moves_down_a_track() {
+        let mut timeline = pair();
+        let group = ids(&timeline);
+
+        timeline
+            .apply(Edit::Nudge {
+                clips: group,
+                frames: 0,
+                tracks: 1,
+                overwrite: false,
+            })
+            .unwrap();
+
+        assert!(timeline.tracks[0].clips.is_empty());
+        assert_eq!(windows(&timeline, 1), vec![(0, 0, 60), (60, 0, 30)]);
+    }
+
+    #[test]
+    fn a_group_trim_moves_every_out_point() {
+        let mut timeline = Timeline::default();
+        // Spaced out, so shortening one does not depend on the other.
+        timeline.apply(Edit::Append(source(2))).unwrap();
+        timeline
+            .apply(Edit::Place {
+                track: 0,
+                source: source(2),
+                position: 120,
+                source_start: 0,
+                length: 60,
+            })
+            .unwrap();
+        let group = ids(&timeline);
+
+        timeline
+            .apply(Edit::Stretch {
+                clips: group,
+                edge: Edge::Out,
+                frames: -10,
+            })
+            .unwrap();
+
+        assert_eq!(windows(&timeline, 0), vec![(0, 0, 50), (120, 0, 50)]);
+    }
+
+    #[test]
+    fn a_group_trim_one_clip_cannot_do_changes_nothing() {
+        let mut timeline = pair();
+        let group = ids(&timeline);
+        let before = windows(&timeline, 0);
+
+        // The 60-frame source has nothing past its end, so the first clip
+        // cannot grow — and the second must not grow on its own either.
+        let refused = timeline.apply(Edit::Stretch {
+            clips: group,
+            edge: Edge::Out,
+            frames: 10,
+        });
+
+        assert!(refused.is_err());
+        assert_eq!(windows(&timeline, 0), before);
+    }
+
+    #[test]
+    fn overwriting_trims_what_it_lands_on() {
+        let mut timeline = pair();
+        let second = ids(&timeline)[1];
+
+        // The 30-frame clip lands halfway into the 60-frame one, which keeps
+        // only the frames before it.
+        timeline
+            .apply(Edit::Nudge {
+                clips: vec![second],
+                frames: -30,
+                tracks: 0,
+                overwrite: true,
+            })
+            .unwrap();
+
+        assert_eq!(windows(&timeline, 0), vec![(0, 0, 30), (30, 0, 30)]);
+    }
+
+    #[test]
+    fn overwriting_down_the_middle_leaves_a_piece_either_side() {
+        let mut timeline = Timeline::default();
+        timeline.apply(Edit::Append(source(4))).unwrap();
+        timeline
+            .apply(Edit::Place {
+                track: 0,
+                source: source(1),
+                position: 200,
+                source_start: 0,
+                length: 30,
+            })
+            .unwrap();
+        let dropped = ids(&timeline)[1];
+
+        // 30 frames dropped at 45, inside a clip running 0..120.
+        timeline
+            .apply(Edit::Nudge {
+                clips: vec![dropped],
+                frames: -155,
+                tracks: 0,
+                overwrite: true,
+            })
+            .unwrap();
+
+        // The halves keep their own windows into the source: 0..45, then the
+        // frames from 75 on.
+        assert_eq!(
+            windows(&timeline, 0),
+            vec![(0, 0, 45), (45, 0, 30), (75, 75, 45)]
+        );
+    }
+
+    #[test]
+    fn overwriting_end_to_end_takes_the_clip_away() {
+        let mut timeline = Timeline::default();
+        timeline
+            .apply(Edit::Place {
+                track: 0,
+                source: source(1),
+                position: 0,
+                source_start: 0,
+                length: 30,
+            })
+            .unwrap();
+        timeline.apply(Edit::Append(source(2))).unwrap();
+        let long = ids(&timeline)[1];
+
+        // The 60-frame clip lands over the 30-frame one, which has nothing
+        // left to show.
+        timeline
+            .apply(Edit::Nudge {
+                clips: vec![long],
+                frames: -30,
+                tracks: 0,
+                overwrite: true,
+            })
+            .unwrap();
+
+        assert_eq!(windows(&timeline, 0), vec![(0, 0, 60)]);
     }
 
     #[test]
@@ -433,7 +770,12 @@ mod tests {
         let mut timeline = pair();
         let before = ids(&timeline);
 
-        timeline.apply(Edit::Insert { source: source(1), frame: 0 }).unwrap();
+        timeline
+            .apply(Edit::Insert {
+                source: source(1),
+                frame: 0,
+            })
+            .unwrap();
 
         // The two original clips kept their ids through the ripple; the new one
         // got an id of its own.
@@ -448,7 +790,12 @@ mod tests {
 
         // Frame 55 is inside the first clip; the edge at 60 is the closest, so
         // the new clip lands between the two rather than inside either.
-        timeline.apply(Edit::Insert { source: source(1), frame: 55 }).unwrap();
+        timeline
+            .apply(Edit::Insert {
+                source: source(1),
+                frame: 55,
+            })
+            .unwrap();
 
         assert_eq!(
             windows(&timeline, 0),
@@ -464,14 +811,22 @@ mod tests {
         // 30..60 is still the first clip's.
         assert!(
             timeline
-                .apply(Edit::Move { clip: second, track: 0, position: 30 })
+                .apply(Edit::Move {
+                    clip: second,
+                    track: 0,
+                    position: 30
+                })
                 .is_err()
         );
         assert_eq!(windows(&timeline, 0), vec![(0, 0, 60), (60, 0, 30)]);
 
         // Past the end is free.
         timeline
-            .apply(Edit::Move { clip: second, track: 0, position: 200 })
+            .apply(Edit::Move {
+                clip: second,
+                track: 0,
+                position: 200,
+            })
             .unwrap();
         assert_eq!(windows(&timeline, 0), vec![(0, 0, 60), (200, 0, 30)]);
     }
@@ -482,7 +837,11 @@ mod tests {
         let second = ids(&timeline)[1];
 
         timeline
-            .apply(Edit::Move { clip: second, track: 1, position: 0 })
+            .apply(Edit::Move {
+                clip: second,
+                track: 1,
+                position: 0,
+            })
             .unwrap();
 
         assert_eq!(windows(&timeline, 0), vec![(0, 0, 60)]);
@@ -490,7 +849,11 @@ mod tests {
         // A track further down than that does not exist to move onto.
         assert!(
             timeline
-                .apply(Edit::Move { clip: second, track: 3, position: 0 })
+                .apply(Edit::Move {
+                    clip: second,
+                    track: 3,
+                    position: 0
+                })
                 .is_err()
         );
     }
@@ -501,7 +864,11 @@ mod tests {
         let first = ids(&timeline)[0];
 
         timeline
-            .apply(Edit::Trim { clip: first, edge: Edge::In, frame: 10 })
+            .apply(Edit::Trim {
+                clip: first,
+                edge: Edge::In,
+                frame: 10,
+            })
             .unwrap();
 
         // Ten frames later in the timeline is ten frames later in the source,
@@ -519,21 +886,37 @@ mod tests {
         // first frame, and nothing after its last.
         assert!(
             timeline
-                .apply(Edit::Trim { clip, edge: Edge::In, frame: 0 })
+                .apply(Edit::Trim {
+                    clip,
+                    edge: Edge::In,
+                    frame: 0
+                })
                 .is_ok()
         );
         timeline
-            .apply(Edit::Trim { clip, edge: Edge::In, frame: 5 })
+            .apply(Edit::Trim {
+                clip,
+                edge: Edge::In,
+                frame: 5,
+            })
             .unwrap();
         assert!(
             timeline
-                .apply(Edit::Trim { clip, edge: Edge::Out, frame: 40 })
+                .apply(Edit::Trim {
+                    clip,
+                    edge: Edge::Out,
+                    frame: 40
+                })
                 .is_err()
         );
         // And an out-point cannot cross its in-point.
         assert!(
             timeline
-                .apply(Edit::Trim { clip, edge: Edge::Out, frame: 5 })
+                .apply(Edit::Trim {
+                    clip,
+                    edge: Edge::Out,
+                    frame: 5
+                })
                 .is_err()
         );
         assert_eq!(windows(&timeline, 0)[0], (5, 5, 25));
@@ -566,19 +949,32 @@ mod tests {
         let mut timeline = pair();
         let first = ids(&timeline)[0];
 
-        timeline.apply(Edit::Delete { clip: first, ripple: false }).unwrap();
+        timeline
+            .apply(Edit::Delete {
+                clip: first,
+                ripple: false,
+            })
+            .unwrap();
         assert_eq!(windows(&timeline, 0), vec![(60, 0, 30)]);
 
         let mut timeline = pair();
         let first = ids(&timeline)[0];
 
-        timeline.apply(Edit::Delete { clip: first, ripple: true }).unwrap();
+        timeline
+            .apply(Edit::Delete {
+                clip: first,
+                ripple: true,
+            })
+            .unwrap();
         assert_eq!(windows(&timeline, 0), vec![(0, 0, 30)]);
 
         // The clip is gone, so naming it again is not an edit.
         assert!(
             timeline
-                .apply(Edit::Delete { clip: first, ripple: false })
+                .apply(Edit::Delete {
+                    clip: first,
+                    ripple: false
+                })
                 .is_err()
         );
     }
@@ -629,7 +1025,10 @@ mod tests {
         assert!(timeline.apply(Edit::Append(empty.clone())).is_err());
         assert!(
             timeline
-                .apply(Edit::Insert { source: empty, frame: 30 })
+                .apply(Edit::Insert {
+                    source: empty,
+                    frame: 30
+                })
                 .is_err()
         );
         assert_eq!(windows(&timeline, 0), before);

@@ -631,6 +631,7 @@ dependencies = [
  "draad",
  "draad-codegen",
  "futures",
+ "gstreamer",
  "libc",
  "serde",
  "tauri",

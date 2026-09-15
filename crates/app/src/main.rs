@@ -1,5 +1,6 @@
 use state::State;
 use std::sync::{Arc, Mutex};
+use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
 use tauri::webview::WebviewBuilder;
 use tauri::window::WindowBuilder;
 use tauri::{PhysicalPosition, RunEvent, TitleBarStyle, WindowEvent};
@@ -27,6 +28,7 @@ fn main() -> anyhow::Result<()> {
 
     // build tauri app
     let app = tauri::Builder::default()
+        .menu(menu)
         .manage(state.clone())
         .invoke_handler(invoke_handler())
         .build(tauri::generate_context!())?;
@@ -101,6 +103,60 @@ fn main() -> anyhow::Result<()> {
     });
 
     Ok(())
+}
+
+/// The macOS menu bar.
+///
+/// Tauri installs a default one when an app sets none, and its Edit submenu
+/// claims ⌘Z and ⇧⌘Z for AppKit's own undo. A key equivalent is matched
+/// before the key ever reaches the webview, so the page never saw them: the
+/// in-window menu bar advertised the shortcuts and only its rows worked.
+///
+/// So this is that default menu minus the items whose keys the app answers
+/// itself — undo and redo live in the document, not in the responder chain.
+/// The clipboard items stay: they are what makes ⌘C and ⌘V work in a text
+/// field, and nothing in the app wants those keys.
+fn menu(handle: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let app = Submenu::with_items(
+        handle,
+        "cut",
+        true,
+        &[
+            &PredefinedMenuItem::about(handle, None, None)?,
+            &PredefinedMenuItem::separator(handle)?,
+            &PredefinedMenuItem::services(handle, None)?,
+            &PredefinedMenuItem::separator(handle)?,
+            &PredefinedMenuItem::hide(handle, None)?,
+            &PredefinedMenuItem::hide_others(handle, None)?,
+            &PredefinedMenuItem::separator(handle)?,
+            &PredefinedMenuItem::quit(handle, None)?,
+        ],
+    )?;
+
+    let edit = Submenu::with_items(
+        handle,
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::cut(handle, None)?,
+            &PredefinedMenuItem::copy(handle, None)?,
+            &PredefinedMenuItem::paste(handle, None)?,
+            &PredefinedMenuItem::select_all(handle, None)?,
+        ],
+    )?;
+
+    let window = Submenu::with_items(
+        handle,
+        "Window",
+        true,
+        &[
+            &PredefinedMenuItem::minimize(handle, None)?,
+            &PredefinedMenuItem::separator(handle)?,
+            &PredefinedMenuItem::close_window(handle, None)?,
+        ],
+    )?;
+
+    Menu::with_items(handle, &[&app, &edit, &window])
 }
 
 // generated stuff

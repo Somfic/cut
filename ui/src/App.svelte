@@ -4,6 +4,7 @@
   import Stage from "./lib/Stage.svelte";
   import Timeline from "./lib/Timeline.svelte";
   import { type Menu } from "./lib/Menubar.svelte";
+  import { selection } from "./lib/selection.svelte";
   import api, {
     Playhead,
     timecode,
@@ -19,6 +20,50 @@
   // Nothing behind the file commands yet — the menu is the shape of the API
   // the engine still has to grow.
   const soon = (what: string) => () => toast.info(`${what} isn't wired up yet`);
+
+  // An edit refused by the engine (a trim past the source, a move onto
+  // occupied frames) comes back as a message written for a person, so it is
+  // worth showing rather than swallowing.
+  const attempt = (edit: Promise<void>) =>
+    edit.catch((e) => toast.error(String(e?.message ?? e)));
+
+  const step = (what: string, go: () => Promise<boolean>) => async () => {
+    if (!(await go())) toast.info(`Nothing to ${what}`);
+  };
+
+  // The clip the playhead is inside, which is what a menu command acts on
+  // until the timeline has a selection of its own.
+  const atPlayhead = $derived(
+    timeline?.tracks
+      .flatMap((track) => track.clips)
+      .find(
+        (clip) =>
+          playhead.frame >= clip.position &&
+          playhead.frame < clip.position + clip.length,
+      ) ?? null,
+  );
+
+  // What an edit command acts on: what is selected, or the clip under the
+  // playhead when nothing is. Same rule for every command, so the menu never
+  // disagrees with itself about what "the clip" means.
+  const targets = $derived.by(() => {
+    const clips = timeline?.tracks.flatMap((track) => track.clips) ?? [];
+    const selected = clips.filter((clip) => selection.has(clip.id));
+
+    return selected.length ? selected : atPlayhead ? [atPlayhead] : [];
+  });
+
+  // Only a clip the playhead is actually inside can be cut in two.
+  const splittable = $derived(
+    targets.filter(
+      (clip) =>
+        playhead.frame > clip.position &&
+        playhead.frame < clip.position + clip.length,
+    ),
+  );
+
+  const many = (what: string, n: number) =>
+    n > 1 ? `${what} ${n} clips` : `${what} clip`;
 
   const menus: Menu[] = $derived([
     {
@@ -62,14 +107,48 @@
           label: "Undo",
           icon: "Undo",
           shortcut: "mod+z",
-          onclick: soon("Undo"),
+          onclick: step("undo", api.edit.undo),
         },
         {
           kind: "item",
           label: "Redo",
           icon: "Redo",
           shortcut: "mod+shift+z",
-          onclick: soon("Redo"),
+          onclick: step("redo", api.edit.redo),
+        },
+        "divider",
+        {
+          kind: "item",
+          label: "Split at playhead",
+          icon: "Scissors",
+          shortcut: "mod+b",
+          disabled: splittable.length === 0,
+          // One edit each, so undoing a multi-clip split takes as many steps
+          // as it made. A single edit covering several clips is the engine's
+          // call, not something to fake from here.
+          onclick: () =>
+            splittable.forEach((clip) =>
+              attempt(api.edit.split(clip.id, playhead.frame)),
+            ),
+        },
+        {
+          kind: "item",
+          label: many("Delete", targets.length),
+          icon: "Trash2",
+          shortcut: "delete",
+          danger: true,
+          disabled: targets.length === 0,
+          onclick: () =>
+            targets.forEach((clip) => attempt(api.edit.delete(clip.id, false))),
+        },
+        {
+          kind: "item",
+          label: many("Ripple delete", targets.length),
+          icon: "Trash2",
+          danger: true,
+          disabled: targets.length === 0,
+          onclick: () =>
+            targets.forEach((clip) => attempt(api.edit.delete(clip.id, true))),
         },
       ],
     },

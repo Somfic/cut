@@ -3,7 +3,7 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 use cut_engine::media::Frame;
 use cut_engine::playback::Controls;
-use cut_engine::project::Timeline;
+use cut_engine::project::{History, Timeline};
 
 #[derive(Default)]
 pub struct State {
@@ -65,6 +65,10 @@ pub struct Surface {
 #[derive(Default)]
 pub struct Session {
     pub timeline: Mutex<Option<Arc<Timeline>>>,
+    /// Versions of the document behind the current one, and ahead of it after
+    /// an undo. Lives here rather than in the engine because it is per-session
+    /// state — nothing about it is written to the project file.
+    pub history: Mutex<History>,
     pub controls: Mutex<Option<Controls>>,
     pub fps: Mutex<f64>,
 }

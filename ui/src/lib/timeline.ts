@@ -55,6 +55,15 @@ export function locate(timeline: Timeline, id: number) {
   return null
 }
 
+/**
+ * A clip to leave out of a calculation, or several — a group being dragged
+ * must not snap to itself, nor count itself as being in its own way.
+ */
+export type Ignored = number | ReadonlySet<number>
+
+const ignored = (ignore: Ignored, id: number) =>
+  typeof ignore === 'number' ? ignore === id : ignore.has(id)
+
 export type Hit = {
   clip: number
   track: number
@@ -87,40 +96,130 @@ export function hit(
   return { clip: clip.id, track, position: clip.position, length: clip.length, frame, edge }
 }
 
-/**
- * Pull `frame` onto a nearby edge — another clip's end, the playhead, or the
- * start of the document — when it is within `SNAP` pixels.
- */
-export function snap(
-  timeline: Timeline, playhead: number, v: Viewport,
-  track: number, frame: number, ignore: number,
-): number {
-  const tolerance = Math.max(SNAP / v.zoom, 0.5)
+/** Every frame a gesture could land flush against. */
+function edgesOf(timeline: Timeline, playhead: number, ignore: Ignored): number[] {
+  // Every track, not just the one being dragged in: clips are cut against
+  // each other across lanes as much as along them, and an edge that lines up
+  // with the track above is exactly the one worth catching.
+  const edges = [0, playhead]
 
-  const candidates = (timeline.tracks[track]?.clips ?? [])
-    .filter((clip) => clip.id !== ignore)
-    .flatMap((clip) => [clip.position, end(clip)])
-    .concat(0, playhead)
-    .filter((edge) => Math.abs(edge - frame) <= tolerance)
+  for (const lane of timeline.tracks) {
+    for (const clip of lane.clips) {
+      if (ignored(ignore, clip.id)) continue
+      edges.push(clip.position, end(clip))
+    }
+  }
 
-  if (candidates.length === 0) return frame
-
-  return candidates.reduce((best, edge) =>
-    Math.abs(edge - frame) < Math.abs(best - frame) ? edge : best)
+  return edges.sort((a, b) => a - b)
 }
 
-/** Either end of a carried clip landing flush is worth the same. */
-export function snapCarried(
+/** What a snap found: how far to pull, and the edge it would land on. */
+export type Snap = { pull: number; at: number | null }
+
+/**
+ * How far to pull a gesture so that one of the edges it carries lands flush
+ * on something that is staying put.
+ *
+ * Every carried edge is a candidate, not just the grabbed clip's: with three
+ * clips selected, the one whose end meets the next clip is usually the one
+ * the eye is on, and a drag that snapped only by the clip under the pointer
+ * would slide the other two through their own alignments. The nearest match
+ * across the group wins, and `at` is what it caught — which is what the
+ * dashed line on the canvas is drawn from.
+ */
+export function snapDelta(
   timeline: Timeline, playhead: number, v: Viewport,
-  track: number, position: number, length: number, clip: number,
+  moving: number[], ignore: Ignored,
+): Snap {
+  const tolerance = Math.max(SNAP / v.zoom, 0.5)
+  const edges = edgesOf(timeline, playhead, ignore)
+  let best: Snap = { pull: 0, at: null }
+
+  for (const frame of moving) {
+    // Sorted, so the search can start at the neighbours either side of this
+    // edge and stop as soon as it is out of reach — a document of hundreds
+    // of clips is searched rather than swept.
+    for (let i = nearest(edges, frame); i < edges.length; i++) {
+      const pull = edges[i] - frame
+      if (pull > tolerance) break
+      if (Math.abs(pull) > tolerance) continue
+      if (best.at === null || Math.abs(pull) < Math.abs(best.pull)) {
+        best = { pull, at: edges[i] }
+      }
+    }
+  }
+
+  return best
+}
+
+/** The first index in a sorted list that could be within reach of `frame`. */
+function nearest(edges: number[], frame: number): number {
+  let low = 0
+  let high = edges.length
+
+  while (low < high) {
+    const mid = (low + high) >> 1
+    if (edges[mid] < frame) low = mid + 1
+    else high = mid
+  }
+
+  // One back, so an edge just before `frame` is still considered.
+  return Math.max(0, low - 1)
+}
+
+/** Pull one frame onto a nearby edge, when there is one within reach. */
+export function snap(
+  timeline: Timeline, playhead: number, v: Viewport, frame: number, ignore: Ignored,
 ): number {
-  const head = snap(timeline, playhead, v, track, position, clip)
-  if (head !== position) return head
+  return frame + snapDelta(timeline, playhead, v, [frame], ignore).pull
+}
 
-  const tail = snap(timeline, playhead, v, track, position + length, clip)
-  if (tail !== position + length) return Math.max(0, tail - length)
+/**
+ * Whether a clip of `length` fits at `position` on `track`.
+ *
+ * The same question `Timeline::apply` asks before it allows a move — asked
+ * here only so a drag can say no while it is still a drag, rather than
+ * bouncing off the engine after the pointer is up.
+ */
+export function hasRoom(
+  timeline: Timeline, track: number, position: number, length: number, ignore: Ignored,
+): boolean {
+  const lane = timeline.tracks[track]
+  if (!lane) return true
 
-  return position
+  return !lane.clips.some(
+    (clip) =>
+      !ignored(ignore, clip.id) && position < end(clip) && clip.position < position + length,
+  )
+}
+
+/** Where a clip would sit once a drag lands. */
+export type Placement = { id: number; track: number; position: number; length: number }
+
+/**
+ * The spans a drop would take off the clips it lands on.
+ *
+ * Dropping a clip over another shortens the one underneath rather than being
+ * refused, so this is what a drag can show before it happens: the frames
+ * that would stop being played, over the clips that would lose them.
+ */
+export function covered(timeline: Timeline, group: Placement[]): Placement[] {
+  const moving = new Set(group.map((p) => p.id))
+  const eaten: Placement[] = []
+
+  for (const p of group) {
+    for (const clip of timeline.tracks[p.track]?.clips ?? []) {
+      if (moving.has(clip.id)) continue
+
+      const from = Math.max(clip.position, p.position)
+      const to = Math.min(end(clip), p.position + p.length)
+      if (from >= to) continue
+
+      eaten.push({ id: clip.id, track: p.track, position: from, length: to - from })
+    }
+  }
+
+  return eaten
 }
 
 /** Where the clips either side leave off — the walls a trim runs into. */

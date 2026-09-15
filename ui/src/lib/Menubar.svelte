@@ -1,29 +1,22 @@
 <script lang="ts" module>
-  import type { PopoverMenuEntry } from 'glow'
+  import type { PopoverMenuEntry } from "glow";
 
-  export type Menu = { label: string; items: PopoverMenuEntry[] }
+  export type Menu = { label: string; items: PopoverMenuEntry[] };
 </script>
 
 <script lang="ts">
-  import { PopoverMenu, rovingFocus } from 'glow'
+  import { PopoverMenu, rovingFocus } from "glow";
 
-  let { menus }: { menus: Menu[] } = $props()
+  let { menus }: { menus: Menu[] } = $props();
 
-  // `bindShortcuts` below makes each item's spec a live accelerator, so the
-  // keys work without the menu being opened first — the bar is the place they
-  // are documented, not the place they are handled.
-
-  // Which menu is down, if any. Held here rather than per-menu so the bar can
-  // behave like a menu bar: once one is open, hovering a sibling switches to
-  // it instead of needing a second click.
-  let openIndex = $state<number | null>(null)
+  let openIndex = $state<number | null>(null);
 
   const hover = (i: number) => {
-    if (openIndex !== null) openIndex = i
-  }
+    if (openIndex !== null) openIndex = i;
+  };
 </script>
 
-<nav use:rovingFocus={{ orientation: 'horizontal' }}>
+<nav use:rovingFocus={{ orientation: "horizontal" }}>
   {#each menus as menu, i (menu.label)}
     <PopoverMenu
       items={menu.items}

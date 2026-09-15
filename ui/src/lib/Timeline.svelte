@@ -188,6 +188,27 @@
     return Math.max(0, Math.min(to, Math.max(0, frames - width / zoom)));
   }
 
+  // A trackpad's wheel is a stream of small, often fractional deltas and can
+  // carry a horizontal axis; a mouse wheel arrives as discrete notches of
+  // ±120 with nothing on deltaX. They get different meanings below, so the
+  // kind has to be guessed — and remembered for a moment, since a fast flick
+  // on a trackpad does produce the occasional round, axis-aligned event that
+  // would otherwise read as a mouse mid-gesture.
+  let trackpadUntil = 0;
+
+  function isTrackpad(event: WheelEvent): boolean {
+    const now = performance.now();
+    const fine =
+      Math.abs(event.deltaY) < 50 || !Number.isInteger(event.deltaY);
+
+    if (event.deltaMode === 0 && (fine || event.deltaX !== 0)) {
+      trackpadUntil = now + 500;
+      return true;
+    }
+
+    return now < trackpadUntil;
+  }
+
   function onWheel(event: WheelEvent) {
     event.preventDefault();
 
@@ -198,8 +219,16 @@
       return;
     }
 
-    // fall back to the vertical axis: a plain mouse wheel has no deltaX, and
-    // without this it could neither pan nor zoom.
+    // Two fingers sideways is the pan, so two fingers up and down is free to
+    // be the zoom — the same mapping as the pinch above, and the gesture a
+    // trackpad reaches for most. A mouse keeps its wheel for panning: it has
+    // no horizontal axis, so zooming it would leave nothing to scroll with.
+    const sideways = Math.abs(event.deltaX) > Math.abs(event.deltaY);
+    if (!sideways && isTrackpad(event)) {
+      zoomBy(Math.exp(-event.deltaY / 200), event.offsetX);
+      return;
+    }
+
     const delta = event.deltaX !== 0 ? event.deltaX : event.deltaY;
     scroll = clampScroll(scroll + delta / zoom);
   }

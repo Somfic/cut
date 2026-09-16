@@ -68,6 +68,30 @@ export function build_menu(c: MenuContext): Menu[] {
       label: "File",
       items: [
         {
+          kind: "item",
+          label: "Open…",
+          icon: "FolderOpen",
+          shortcut: "mod+o",
+          onclick: () => api.project.open(),
+        },
+        {
+          kind: "item",
+          label: "Save",
+          icon: "Save",
+          shortcut: "mod+s",
+          disabled: !c.timeline,
+          onclick: () => api.project.save(),
+        },
+        {
+          kind: "item",
+          label: "Save as…",
+          icon: "SaveAll",
+          shortcut: "mod+shift+s",
+          disabled: !c.timeline,
+          onclick: () => api.project.saveAs(),
+        },
+        "divider",
+        {
           kind: "submenu",
           label: "Import",
           icon: "Import",

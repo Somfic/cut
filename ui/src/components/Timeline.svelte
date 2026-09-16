@@ -137,8 +137,11 @@
 
   $effect(() => {
     const observer = new ResizeObserver(([entry]) => {
-      width = entry.contentRect.width;
-      height = entry.contentRect.height;
+      const { width: w, height: h } = entry.contentRect;
+      // A repeat is a buffer reallocation and a repaint for nothing.
+      if (w === width && h === height) return;
+
+      [width, height] = [w, h];
     });
     observer.observe(wrap);
     return () => observer.disconnect();
@@ -446,7 +449,7 @@
 <div class="wrap" bind:this={wrap}>
   <canvas
     bind:this={canvas}
-    style="width: {width}px; height: {height}px; cursor: {cursor}"
+    style="cursor: {cursor}"
     onwheel={onWheel}
     onpointerdown={onPointerDown}
     onpointermove={onPointerMove}
@@ -464,7 +467,14 @@
     overflow: hidden;
   }
 
+  /* Sized by the wrap rather than by the size the observer measured:
+     mirroring that back into an inline width resizes the element from inside
+     the observer's own callback, which is the loop the browser complains
+     about. `width` and `height` are the backing store and what the painting
+     is laid out against, nothing the page's layout depends on. */
   canvas {
     display: block;
+    width: 100%;
+    height: 100%;
   }
 </style>

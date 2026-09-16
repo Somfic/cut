@@ -213,6 +213,7 @@ fn change(state: &State, continuing: bool, edit: Edit) -> Result<(), String> {
     drop(slot);
 
     publish(state, next);
+    crate::api::project::touch(state);
     Ok(())
 }
 
@@ -236,13 +237,16 @@ fn step(
     drop(slot);
 
     publish(state, there.timeline);
+    // An undo moves the document too: back to a version the disk may well
+    // have, but not one we can tell apart from any other without comparing.
+    crate::api::project::touch(state);
     Some(there.view)
 }
 
 /// Both halves: the canvas, so it redraws, and playback, so the frames keep
 /// matching. The timeline lock is released first — playback's queue is the one
 /// place the two could otherwise be taken in the opposite order.
-fn publish(state: &State, timeline: Arc<Timeline>) {
+pub fn publish(state: &State, timeline: Arc<Timeline>) {
     if let Some(events) = state.events.get() {
         events
             .timeline

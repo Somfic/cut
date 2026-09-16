@@ -1,6 +1,7 @@
 export type {
   ClipDto,
   EdgeDto,
+  ProjectDto,
   ViewDto,
   StatsDto,
   TimelineDto,

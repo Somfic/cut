@@ -28,10 +28,20 @@ fn main() -> anyhow::Result<()> {
 
     // build tauri app
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .menu(menu)
         .manage(state.clone())
         .invoke_handler(invoke_handler())
         .build(tauri::generate_context!())?;
+
+    // the dialogs need it, and it only exists once the app is built
+    state
+        .handle
+        .set(app.handle().clone())
+        .unwrap_or_else(|_| unreachable!("the app is built once"));
+
+    // where saves go until the user says otherwise
+    state.session.project.lock().unwrap().path = Some(project.clone());
 
     // build events
     let bus = draad::TauriBus::new(app.handle().clone());
@@ -89,6 +99,9 @@ fn main() -> anyhow::Result<()> {
     // start decoder
     decode::spawn_decoder(state.clone(), project);
 
+    // start autosave
+    api::project::spawn_autosave(state.clone());
+
     // start uploader
     {
         let (shared, handle, gpu) = (state.clone(), app.handle().clone(), gpu.clone());
@@ -105,8 +118,11 @@ fn main() -> anyhow::Result<()> {
                     eprintln!("present failed: {e:#}");
                 }
             }
-            // on exit kill frontend too
-            RunEvent::Exit => drop(frontend.lock().unwrap().take()),
+            // on exit write out anything unsaved, and kill the frontend too
+            RunEvent::Exit => {
+                api::project::flush(&state);
+                drop(frontend.lock().unwrap().take());
+            }
             _ => {}
         }
     });

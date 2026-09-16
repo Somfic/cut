@@ -1,5 +1,7 @@
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::time::Instant;
 
 use cut_engine::media::Frame;
 use cut_engine::playback::Controls;
@@ -15,6 +17,8 @@ pub struct State {
     pub session: Session,
     pub counters: Counters,
     pub events: OnceLock<crate::generated::Events>,
+    /// Set once the app is built. The file dialogs hang off it.
+    pub handle: OnceLock<tauri::AppHandle>,
     /// What the window is doing, so a change can be told from a repeat.
     pub window: Mutex<WindowDto>,
 }
@@ -79,6 +83,22 @@ pub struct Session {
     pub view: Mutex<ViewDto>,
     pub controls: Mutex<Option<Controls>>,
     pub fps: Mutex<f64>,
+    /// Which file the document is being edited as.
+    pub project: Mutex<Project>,
+}
+
+/// The document's relationship with the disk. Separate from the timeline's
+/// own lock: a save reads the timeline and then releases it, and autosave
+/// asks "is there anything to write" far more often than it writes.
+#[derive(Default)]
+pub struct Project {
+    /// Where a save goes. Absent until the user names one.
+    pub path: Option<PathBuf>,
+    /// Whether what is in memory is what is on disk.
+    pub saved: bool,
+    /// When the last edit landed, so autosave can wait for a lull rather than
+    /// write once per keystroke of a held arrow key.
+    pub touched: Option<Instant>,
 }
 
 /// A step of the undo stack: the document, and where it was being looked at.

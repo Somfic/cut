@@ -57,13 +57,19 @@ pub fn spawn_decoder(shared: Arc<State>, project: std::path::PathBuf) {
                         playback::Event::Ready(controls) => {
                             *state.session.controls.lock().unwrap() = Some(controls);
                         }
-                        playback::Event::Opened { timeline, .. } => {
+                        playback::Event::Opened { timeline, on_disk } => {
                             if let Some(events) = state.events.get() {
                                 events
                                     .timeline
                                     .emit_changed(&crate::api::timeline::dto(&timeline));
                             }
                             *state.session.timeline.lock().unwrap() = Some(timeline);
+
+                            // The demo fallback is a document nothing has
+                            // written yet: calling it unsaved is what has
+                            // autosave give the project its file, a couple of
+                            // seconds later.
+                            crate::api::project::opened(&state, on_disk);
                         }
                         playback::Event::Frame(frame) => {
                             state.counters.frames.fetch_add(1, Ordering::Relaxed);

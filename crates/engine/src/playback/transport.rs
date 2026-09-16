@@ -51,8 +51,8 @@ fn cut(
 /// there yet — saving over that fallback is how the first project gets written.
 fn open(project: &Path) -> anyhow::Result<(Timeline, bool)> {
     if project.exists() {
-        let timeline = file::load(project)
-            .with_context(|| format!("could not open {}", project.display()))?;
+        let timeline =
+            file::load(project).with_context(|| format!("could not open {}", project.display()))?;
 
         Ok((timeline, true))
     } else {

@@ -24,6 +24,8 @@ serde = { version = "1", features = ["derive"] }
 # `unstable` is what gates `Window::add_child`, the multi-surface API the whole
 # approach rests on.
 tauri = { version = "2", features = ["unstable", "macos-private-api"] }
+# The open and save panels. Driven from Rust, so the page never calls it.
+tauri-plugin-dialog = "2"
 wgpu = "27"
 
 # Killing the dev server means killing its whole process group: `bun run dev`

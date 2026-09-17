@@ -1,11 +1,10 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
-use cut_engine::media::Frame;
-use cut_engine::playback::Controls;
-use cut_engine::project::{History, Timeline};
+use cut_playback::{Controls, FrameSlot};
+use cut_timeline::{History, Timeline};
 
 use crate::api::view::ViewDto;
 use crate::api::window::WindowDto;
@@ -17,52 +16,15 @@ pub struct State {
     pub session: Session,
     pub counters: Counters,
     pub events: OnceLock<crate::generated::Events>,
-    /// Set once the app is built. The file dialogs hang off it.
     pub handle: OnceLock<tauri::AppHandle>,
-    /// What the window is doing, so a change can be told from a repeat.
     pub window: Mutex<WindowDto>,
 }
 
 impl State {
-    /// Publish, if there is anywhere to publish to yet: the bus arrives with
-    /// the app, and the first events are emitted while it is still building.
     pub fn emit(&self, event: impl FnOnce(&crate::generated::Events)) {
         if let Some(events) = self.events.get() {
             event(events);
         }
-    }
-}
-
-#[derive(Default)]
-pub struct FrameSlot {
-    frame: Mutex<Option<Arc<Frame>>>,
-    arrived: Condvar,
-    uploaded: AtomicU64,
-}
-
-impl FrameSlot {
-    pub fn put(&self, frame: Arc<Frame>) -> bool {
-        let displaced = self.frame.lock().unwrap().replace(frame).is_some();
-        self.arrived.notify_one();
-        displaced
-    }
-
-    pub fn take(&self) -> Arc<Frame> {
-        let mut slot = self.frame.lock().unwrap();
-        loop {
-            if let Some(frame) = slot.take() {
-                return frame;
-            }
-            slot = self.arrived.wait(slot).unwrap();
-        }
-    }
-
-    pub fn uploaded(&self) {
-        self.uploaded.fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub fn generation(&self) -> u64 {
-        self.uploaded.load(Ordering::Relaxed)
     }
 }
 
@@ -84,31 +46,22 @@ pub struct Surface {
 #[derive(Default)]
 pub struct Session {
     pub timeline: Mutex<Option<Arc<Timeline>>>,
-    /// Per-session, not part of the document: none of it is ever written out.
-    pub history: Mutex<History<Version>>,
-    /// Where the timeline was last left, copied into each recorded version.
+    pub history: Mutex<History<HistoryEntry>>,
     pub view: Mutex<ViewDto>,
     pub controls: Mutex<Option<Controls>>,
     pub fps: Mutex<f64>,
-    /// Which file the document is being edited as.
     pub project: Mutex<Project>,
 }
 
-/// The document's relationship with the disk, under its own lock: autosave
-/// asks whether there is anything to write far more often than it writes.
 #[derive(Default)]
 pub struct Project {
-    /// Where a save goes. Absent until the user names one.
     pub path: Option<PathBuf>,
-    /// Whether what is in memory is what is on disk.
     pub saved: bool,
-    /// When the last edit landed, so autosave can wait for a lull.
-    pub touched: Option<Instant>,
+    pub last_edited: Option<Instant>,
 }
 
-/// A step of the undo stack: the document, and where it was being looked at.
 #[derive(Clone)]
-pub struct Version {
+pub struct HistoryEntry {
     pub timeline: Arc<Timeline>,
     pub view: ViewDto,
 }

@@ -15,8 +15,10 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
-cut-engine = { path = "../engine" }
+cut-media = { path = "../media" }
+cut-playback = { path = "../playback" }
 cut-render = { path = "../render" }
+cut-timeline = { path = "../timeline" }
 draad = { git = "https://github.com/somfic/draad", features = ["tauri"] }
 async-trait = "0.1"
 futures = { workspace = true }
@@ -33,7 +35,3 @@ wgpu = "27"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-# Only the tests construct a `Source` by hand, which needs the `Fraction` its
-# frame rate is measured in.
-[dev-dependencies]
-gstreamer = "0.25.3"

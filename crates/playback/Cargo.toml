@@ -1,0 +1,12 @@
+[package]
+name = "cut-playback"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = { workspace = true }
+cut-audio = { path = "../audio" }
+cut-media = { path = "../media" }
+cut-timeline = { path = "../timeline" }
+futures = { workspace = true }
+futures-timer = { workspace = true }

@@ -14,7 +14,7 @@ mod state;
 const DEFAULT_PROJECT: &str = "project.cut";
 
 fn main() -> anyhow::Result<()> {
-    cut_engine::init()?;
+    cut_media::init()?;
 
     let project = std::env::args_os()
         .nth(1)

@@ -1,9 +1,31 @@
-//! Putting a decoded [`Frame`] on screen: the planes go to the GPU untouched
+//! Putting a decoded picture on screen: the planes go to the GPU untouched
 //! and the shader does the YUV conversion.
+//!
+//! Nothing here knows where a picture came from — a [`Picture`] is two plane
+//! slices and their strides, so this crate depends on no decoder.
 
-use std::sync::Arc;
+/// How the two planes are packed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PixelLayout {
+    /// 8-bit: one byte per sample
+    Nv12,
+    /// 10-bit in the high bits of a 16-bit little-endian
+    P010,
+}
 
-use cut_engine::media::{Frame, PixelLayout};
+/// A decoded picture, borrowed where it already lies. Rows may be padded, so
+/// each plane carries its own stride.
+pub struct Picture<'a> {
+    pub width: u32,
+    pub height: u32,
+    pub layout: PixelLayout,
+    /// The luma plane.
+    pub y: &'a [u8],
+    pub y_stride: u32,
+    /// The interleaved chroma plane (Cb,Cr pairs).
+    pub uv: &'a [u8],
+    pub uv_stride: u32,
+}
 
 pub struct FrameRenderer {
     pipeline: wgpu::RenderPipeline,
@@ -11,9 +33,6 @@ pub struct FrameRenderer {
     bind_group_layout: wgpu::BindGroupLayout,
     uniform_buffer: wgpu::Buffer,
     texture: Option<FrameTexture>,
-    /// Held, not compared by value: while this `Arc` is alive no other frame
-    /// can reuse its address, which is what makes `ptr_eq` sound.
-    uploaded: Option<Arc<Frame>>,
 }
 
 struct FrameTexture {
@@ -125,24 +144,17 @@ impl FrameRenderer {
             bind_group_layout,
             uniform_buffer,
             texture: None,
-            uploaded: None,
         }
     }
 }
 
 impl FrameRenderer {
-    pub fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &Arc<Frame>) {
-        // Redraws outnumber frames — display rate against 24-30fps — and
-        // re-uploading an unchanged picture costs megabytes each time.
-        if self
-            .uploaded
-            .as_ref()
-            .is_some_and(|current| Arc::ptr_eq(current, frame))
-        {
-            return;
-        }
-        self.uploaded = Some(frame.clone());
-
+    /// Put `picture` on the GPU, reusing the textures when its size and
+    /// layout have not changed. Uploading costs megabytes, so a caller that
+    /// redraws more often than frames arrive should not call this twice for
+    /// one picture.
+    pub fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, picture: &Picture) {
+        let frame = picture;
         let size = (frame.width, frame.height);
 
         // P010's 16-bit planes go up reinterpreted as byte channels, no CPU
@@ -232,12 +244,12 @@ impl FrameRenderer {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            frame.y(),
+            frame.y,
             // The decoder's own stride. `write_texture` puts no alignment
             // requirement on it, unlike a buffer copy.
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(frame.y_stride()),
+                bytes_per_row: Some(frame.y_stride),
                 rows_per_image: Some(frame.height),
             },
             wgpu::Extent3d {
@@ -253,10 +265,10 @@ impl FrameRenderer {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            frame.uv(),
+            frame.uv,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(frame.uv_stride()),
+                bytes_per_row: Some(frame.uv_stride),
                 rows_per_image: Some(frame.height / 2),
             },
             wgpu::Extent3d {
@@ -268,7 +280,7 @@ impl FrameRenderer {
     }
 
     /// What is on the GPU: a caller that uploads and presents on different
-    /// threads has no `Frame` left to ask by the time it draws.
+    /// threads has no picture left to ask by the time it draws.
     pub fn uploaded_size(&self) -> Option<(u32, u32)> {
         self.texture.as_ref().map(|texture| texture.size)
     }

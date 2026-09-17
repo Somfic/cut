@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/app", "crates/engine", "crates/render"]
+members = ["crates/app", "crates/audio", "crates/media", "crates/playback", "crates/render", "crates/timeline"]
 default-members = ["crates/app"]
 resolver = "3"
 

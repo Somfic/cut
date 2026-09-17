@@ -1,0 +1,16 @@
+[package]
+name = "cut-media"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = { workspace = true }
+bytemuck = "1.25.2"
+cut-timeline = { path = "../timeline" }
+gstreamer = "0.25.3"
+gstreamer-app = "0.25.2"
+gstreamer-video = "0.25.3"
+
+# The project-file round trip, which needs media real enough to probe.
+[dev-dependencies]
+anyhow = { workspace = true }

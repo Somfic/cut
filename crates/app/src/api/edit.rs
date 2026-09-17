@@ -1,15 +1,14 @@
 use std::sync::Arc;
 
-use cut_engine::media::Source;
-use cut_engine::playback::Request;
-use cut_engine::project::{ClipId, Edge, Edit, History, Placement, Timeline, TrimTo};
+use cut_playback::Request;
+use cut_timeline::{ClipId, Edge, Edit, History, Placement, Source, Timeline, TrimTo};
 use draad::{api, ty};
 
 use crate::api::view;
 // Re-exported, not just imported: the generated commands for this namespace
 // glob this module, and undo answers with one of these.
 pub use crate::api::view::ViewDto;
-use crate::state::{State, Version};
+use crate::state::{HistoryEntry, State};
 
 /// Which end of a clip a trim moves.
 #[ty]
@@ -185,7 +184,7 @@ fn ids(clips: Vec<u64>) -> Vec<ClipId> {
 }
 
 fn source(path: &str) -> Result<Arc<Source>, String> {
-    Source::new(path)
+    cut_media::probe_source(std::path::Path::new(path))
         .map(Arc::new)
         .map_err(|e| format!("could not open {path}: {e:#}"))
 }
@@ -205,7 +204,7 @@ fn change(state: &State, continuing: bool, edit: Edit) -> Result<(), String> {
 
     let mut history = state.session.history.lock().unwrap();
     if !(continuing && history.amend()) {
-        history.record(Version {
+        history.record(HistoryEntry {
             timeline: current,
             view: view::current(state),
         });
@@ -222,12 +221,12 @@ fn change(state: &State, continuing: bool, edit: Edit) -> Result<(), String> {
 /// Undo and redo differ only in which end they take from.
 fn step(
     state: &State,
-    take: impl FnOnce(&mut History<Version>, Version) -> Option<Version>,
+    take: impl FnOnce(&mut History<HistoryEntry>, HistoryEntry) -> Option<HistoryEntry>,
 ) -> Option<ViewDto> {
     let mut slot = state.session.timeline.lock().unwrap();
     let timeline = slot.clone()?;
 
-    let here = Version {
+    let here = HistoryEntry {
         timeline,
         view: view::current(state),
     };

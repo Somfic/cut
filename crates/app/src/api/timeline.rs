@@ -1,4 +1,4 @@
-use cut_engine::project::{Clip, Timeline};
+use cut_timeline::{Clip, Timeline};
 use draad::{api, events, ty};
 use std::sync::Arc;
 

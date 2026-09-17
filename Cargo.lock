@@ -626,12 +626,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "cut-engine",
+ "cut-media",
+ "cut-playback",
  "cut-render",
+ "cut-timeline",
  "draad",
  "draad-codegen",
  "futures",
- "gstreamer",
  "libc",
  "serde",
  "tauri",
@@ -641,28 +642,51 @@ dependencies = [
 ]
 
 [[package]]
-name = "cut-engine"
+name = "cut-audio"
+version = "0.1.0"
+dependencies = [
+ "cpal",
+ "ringbuf",
+]
+
+[[package]]
+name = "cut-media"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytemuck",
- "cpal",
- "futures",
- "futures-timer",
+ "cut-timeline",
  "gstreamer",
  "gstreamer-app",
  "gstreamer-video",
- "ringbuf",
- "serde",
- "serde_json",
+]
+
+[[package]]
+name = "cut-playback"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cut-audio",
+ "cut-media",
+ "cut-timeline",
+ "futures",
+ "futures-timer",
 ]
 
 [[package]]
 name = "cut-render"
 version = "0.1.0"
 dependencies = [
- "cut-engine",
  "wgpu",
+]
+
+[[package]]
+name = "cut-timeline"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

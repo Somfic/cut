@@ -1,9 +1,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use cut_engine::project::Edit;
+use cut_timeline::{Edit, Rational};
 use futures::executor::block_on;
-use gstreamer::Fraction;
 
 use super::*;
 
@@ -11,11 +10,11 @@ use super::*;
 /// edit here is arithmetic on measurements, and probing a real video would
 /// only make the test slower and machine-dependent.
 fn session() -> Arc<State> {
-    let source = Arc::new(Source {
-        path: PathBuf::from("ten.mp4"),
-        duration: Duration::from_secs(10),
-        frame_rate: Fraction::new(30, 1),
-    });
+    let source = Arc::new(Source::new(
+        PathBuf::from("ten.mp4"),
+        Duration::from_secs(10),
+        Rational::new(30, 1),
+    ));
 
     let mut timeline = Timeline::default();
     for i in 0..3 {

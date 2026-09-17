@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, anyhow};
-use cut_engine::project::{History, Timeline, file};
+use cut_timeline::{History, Timeline, file};
 use draad::{api, events, ty};
 use futures::channel::oneshot;
 use tauri_plugin_dialog::DialogExt;
@@ -73,7 +73,7 @@ impl ProjectApi for Arc<State> {
             return Ok(());
         };
 
-        let timeline = file::load(&path).map_err(fault)?;
+        let timeline = file::load(&path, &|path| cut_media::probe_source(path)).map_err(fault)?;
         adopt(self, Arc::new(timeline), path);
         Ok(())
     }
@@ -143,7 +143,7 @@ pub fn opened(state: &State, on_disk: bool) {
 pub fn touch(state: &State) {
     set(state, |project| {
         project.saved = false;
-        project.touched = Some(Instant::now());
+        project.last_edited = Some(Instant::now());
     });
 }
 
@@ -176,14 +176,14 @@ pub fn flush(state: &State) {
 /// The file to write, once the editing has been stopped for `lull`.
 fn pending(state: &State, lull: Duration) -> Option<PathBuf> {
     let project = state.session.project.lock().unwrap();
-    let settled = project.touched.is_some_and(|at| at.elapsed() >= lull);
+    let settled = project.last_edited.is_some_and(|at| at.elapsed() >= lull);
 
     project.path.clone().filter(|_| !project.saved && settled)
 }
 
 fn matches_disk(project: &mut Project) {
     project.saved = true;
-    project.touched = None;
+    project.last_edited = None;
 }
 
 /// Change what the session knows about the file, and tell the front end.

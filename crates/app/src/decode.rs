@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
-use cut_engine::playback;
+use cut_playback as playback;
 use futures::StreamExt;
 
 use crate::state::State;
@@ -63,7 +63,7 @@ pub fn spawn_decoder(shared: Arc<State>, project: std::path::PathBuf) {
                         }
                         playback::Event::Frame(frame) => {
                             state.counters.frames.fetch_add(1, Ordering::Relaxed);
-                            let fps = frame.fps.numer() as f64 / frame.fps.denom() as f64;
+                            let fps = frame.fps.as_f64();
                             if fps > 0.0 {
                                 *state.session.fps.lock().unwrap() = fps;
                             }

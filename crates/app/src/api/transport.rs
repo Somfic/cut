@@ -1,5 +1,5 @@
 use crate::state::State;
-use cut_engine::playback::{Controls, Request, SeekMode};
+use cut_playback::{Controls, Request, SeekMode};
 use draad::{api, events, ty};
 use std::sync::Arc;
 

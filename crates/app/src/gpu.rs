@@ -1,5 +1,6 @@
 use crate::state::{Rect, State};
-use cut_render::FrameRenderer;
+use cut_media::{Frame, PixelLayout};
+use cut_render::{FrameRenderer, Picture};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
@@ -20,6 +21,9 @@ pub struct Uploader {
     device: wgpu::Device,
     queue: wgpu::Queue,
     renderer: Arc<Mutex<FrameRenderer>>,
+    /// Held, not compared by value: while this `Arc` is alive no other frame
+    /// can reuse its address, which is what makes `ptr_eq` sound.
+    uploaded: Option<Arc<Frame>>,
 }
 
 impl Gpu {
@@ -91,6 +95,7 @@ impl Gpu {
             device: self.device.clone(),
             queue: self.queue.clone(),
             renderer: self.renderer.clone(),
+            uploaded: None,
         }
     }
 
@@ -212,14 +217,24 @@ impl Gpu {
 }
 
 impl Uploader {
-    pub fn run(self, shared: Arc<State>, handle: tauri::AppHandle, gpu: Arc<Mutex<Gpu>>) {
+    pub fn run(mut self, shared: Arc<State>, handle: tauri::AppHandle, gpu: Arc<Mutex<Gpu>>) {
         loop {
             let frame = shared.slot.take();
 
-            self.renderer
-                .lock()
-                .unwrap()
-                .upload(&self.device, &self.queue, &frame);
+            // Redraws outnumber frames — display rate against 24-30fps — and
+            // re-uploading an unchanged picture costs megabytes each time.
+            let repeat = self
+                .uploaded
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, &frame));
+
+            if !repeat {
+                self.renderer
+                    .lock()
+                    .unwrap()
+                    .upload(&self.device, &self.queue, &picture(&frame));
+                self.uploaded = Some(frame);
+            }
             shared.slot.uploaded();
 
             let gpu = gpu.clone();
@@ -234,6 +249,23 @@ impl Uploader {
                 })
                 .ok();
         }
+    }
+}
+
+/// A decoded frame as the renderer wants it: the planes where they lie, and
+/// the strides to read them by.
+fn picture(frame: &Frame) -> Picture<'_> {
+    Picture {
+        width: frame.width,
+        height: frame.height,
+        layout: match frame.layout {
+            PixelLayout::Nv12 => cut_render::PixelLayout::Nv12,
+            PixelLayout::P010 => cut_render::PixelLayout::P010,
+        },
+        y: frame.y(),
+        y_stride: frame.y_stride(),
+        uv: frame.uv(),
+        uv_stride: frame.uv_stride(),
     }
 }
 

@@ -145,10 +145,13 @@ function clips(f: Frame) {
 
     const top = topOf(it.lane.value);
 
-    // Carried clips fade back where they still are: the move has not
-    // happened, and a hole in the track would say it had.
+    // Carried clips fade where they still are: the move has not happened,
+    // and a hole in the track would say it had.
     const dimmed = f.drag?.ids.has(it.clip.id) ? f.scene.fades.carry.value : 0;
-    const alpha = it.present.value * (1 - 0.75 * dimmed);
+    // Still edited, so its clips stay legible rather than ghosting out the
+    // way a carried one does.
+    const off = 1 - 0.45 * (1 - it.enabled.value);
+    const alpha = it.present.value * (1 - 0.75 * dimmed) * off;
 
     ctx.globalAlpha = alpha;
     ctx.fillStyle = c.clip;

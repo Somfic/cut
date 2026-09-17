@@ -42,9 +42,8 @@ impl TransportApi for Arc<State> {
             controls.send(Request::Seek((frame, SeekMode::Accurate)));
         }
 
-        // The frame asked for, not the one playback is still showing: the
-        // request is queued, so reading the engine back would answer with
-        // where the playhead was before the seek.
+        // The frame asked for: the request is queued, so reading the engine
+        // back would answer with where the playhead was before it.
         announce(
             self,
             TransportDto {
@@ -66,8 +65,7 @@ impl TransportApi for Arc<State> {
             }
         };
 
-        // Likewise: the engine flips its flag when it picks the request up,
-        // and the front end's clock keeps running on a stale `playing`.
+        // Likewise: the engine flips its flag when it picks the request up.
         announce(
             self,
             TransportDto {
@@ -109,9 +107,7 @@ pub fn publish(state: &State) {
 
 /// Tell it something the engine has been asked for but has not caught up with.
 fn announce(state: &State, transport: TransportDto) {
-    if let Some(events) = state.events.get() {
-        events.transport.emit_changed(&transport);
-    }
+    state.emit(|events| events.transport.emit_changed(&transport));
 }
 
 #[events(namespace = "transport")]

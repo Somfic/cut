@@ -30,18 +30,13 @@ mod dev {
     /// How long to wait for vite before loading anyway.
     const STARTUP: Duration = Duration::from_secs(20);
 
-    /// The group to stop on a signal, or 0 for none.
-    ///
-    /// `RunEvent::Exit` covers closing the window, but a terminal `Ctrl-C`
-    /// kills us outright — and the child has its own group, so it does not
-    /// get the interrupt either. Without this it would be left holding the
-    /// port.
+    /// The group to stop on a signal, or 0 for none. `RunEvent::Exit` covers
+    /// closing the window; a terminal `Ctrl-C` kills us outright, and the
+    /// child's own group never sees the interrupt.
     static GROUP: AtomicI32 = AtomicI32::new(0);
 
-    /// The vite process, stopped when this is dropped.
-    ///
-    /// Left running it holds the port, and the next run fails on vite's
-    /// `strictPort`.
+    /// The vite process, stopped on drop: left running it holds the port and
+    /// the next run fails on `strictPort`.
     pub struct DevServer(Option<Child>);
 
     impl DevServer {
@@ -117,8 +112,8 @@ mod dev {
         }
     }
 
-    // vite binds `localhost`, which on this machine resolves to `[::1]` only
-    // probing `127.0.0.1` alone waits out the whole timeout while the
+    // Every address `localhost` resolves to: vite may be bound to `[::1]`
+    // alone, and probing `127.0.0.1` would then wait out the whole timeout.
     fn listening() -> bool {
         let Ok(addrs) = ("localhost", PORT).to_socket_addrs() else {
             return false;

@@ -15,13 +15,20 @@ use crate::{
 pub struct Engine {
     sinks: Sinks,
     players: Vec<Player>,
+    /// Frames come out of one video sink however many tracks play, so this
+    /// is whose clip the last cut left them belonging to.
+    leading: usize,
 }
 
 impl Engine {
     pub fn new() -> (Self, VideoStream) {
         let (sinks, video) = Sinks::new();
         let players = vec![Player::new(&sinks)];
-        let engine = Engine { sinks, players };
+        let engine = Engine {
+            sinks,
+            players,
+            leading: 0,
+        };
         (engine, video)
     }
 
@@ -50,8 +57,8 @@ impl Engine {
         self.sinks.audio_playing.load(Ordering::Relaxed)
     }
 
-    /// The flag the audio callback reads to decide whether to output. Handed out
-    /// so observers share it instead of keeping a copy that can drift.
+    /// The flag the audio callback reads, handed out so observers share it
+    /// rather than keep a copy that can drift.
     pub fn playing_flag(&self) -> Arc<AtomicBool> {
         self.sinks.audio_playing.clone()
     }
@@ -60,15 +67,20 @@ impl Engine {
         self.sinks.clock.position()
     }
 
-    /// What a given track is currently playing. Frames arrive stamped with
-    /// source time, so the caller needs this to map one back onto the timeline.
+    /// What a track is playing. Frames carry source time, so this is what
+    /// maps one back onto the timeline.
     pub fn live_clip(&self, track: usize) -> Option<&Clip> {
         self.players.get(track).and_then(|p| p.live_clip())
     }
 
-    /// Move the whole timeline to `tl_frame`: every track cuts to whichever clip
-    /// covers that position. There's one playhead, so there's no track
-    /// parameter — keeping the tracks together is the engine's job.
+    /// Where the frames now arriving came from. Not always track 0, which
+    /// may be empty there or switched off.
+    pub fn leading_clip(&self) -> Option<&Clip> {
+        self.live_clip(self.leading)
+    }
+
+    /// Every track cuts to whatever covers `tl_frame`. One playhead, so no
+    /// track parameter: keeping them together is the engine's job.
     pub fn cut_to(
         &mut self,
         timeline: &Timeline,
@@ -81,18 +93,35 @@ impl Engine {
         }
 
         let mut landed = None;
-        for (track, player) in timeline.tracks.iter().zip(&mut self.players) {
+        for (index, (track, player)) in timeline.tracks.iter().zip(&mut self.players).enumerate() {
+            // Off plays nothing, including the clip it is sitting on.
+            if !track.enabled {
+                player.pause();
+                continue;
+            }
+
             // A gap on this track: nothing to cut to, leave its decoder alone.
             let Some(clip) = track.clip_at(tl_frame) else {
                 continue;
             };
-            landed = landed.or(player.cut_to(clip, tl_frame, stream, mode)?);
+
+            let at = player.cut_to(clip, tl_frame, stream, mode)?;
+
+            // `cut_to` only sets decoder state when it swaps source, so a
+            // track coming back on would otherwise stay paused.
+            if self.sinks.audio_playing.load(Ordering::Relaxed) {
+                player.play();
+            }
+
+            if landed.is_none() && at.is_some() {
+                self.leading = index;
+            }
+            landed = landed.or(at);
         }
 
-        // Re-base the master clock and drop stale audio exactly once, however
-        // many tracks moved. Frame times are still source-relative, so the clock
-        // follows the first track that landed — revisit when compositing gives
-        // the timeline its own time base.
+        // Re-base the clock and drop stale audio once, however many tracks
+        // moved. It follows the first that landed until compositing gives the
+        // timeline its own time base.
         if let Some(target) = landed {
             self.sinks.clock.seek_to(target);
             self.sinks.flush_audio.store(true, Ordering::Relaxed);

@@ -9,9 +9,8 @@ use std::time::Duration;
 pub struct Source {
     pub path: PathBuf,
     pub duration: Duration,
-    /// Kept as the rational the file declares rather than a divided-out float:
-    /// everything a timeline stores is a frame index, so this is what gives
-    /// those indices a meaning in time — and 29.97 fps is 30000/1001.
+    /// The rational the file declares, not a divided-out float: 29.97 fps is
+    /// 30000/1001, and every stored frame index leans on it.
     pub frame_rate: Fraction,
 }
 

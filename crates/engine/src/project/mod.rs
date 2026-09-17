@@ -1,8 +1,5 @@
-//! The document: what the user is editing. Pure data — no live resources, no
-//! decoders — so it can be shared with the UI, snapshotted for undo, and
-//! written to disk. Every change to it is an `Edit` carried out by
-//! `Timeline::apply`. The runtime that *plays* it lives in `playback`, and the
-//! on-disk shape in `file`.
+//! The document: pure data, no decoders, so it can be shared with the UI,
+//! snapshotted for undo and written to disk. Every change is an `Edit`.
 
 mod clip;
 mod edit;

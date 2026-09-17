@@ -13,7 +13,7 @@
 
   let readout = $state("");
 
-  // Delete and Backspace do what the menu's X does; a row can only print one.
+  // Delete and Backspace do what the menu's X does; a row prints one key.
   $effect(() => {
     const clips = document.clips.filter((clip) => selection.has(clip.id));
     const remove = () =>
@@ -29,8 +29,8 @@
     return () => stop.forEach((off) => off());
   });
 
-  // The readout polls: it is diagnostics, and pushing it would be traffic
-  // for its own sake.
+  // Polled: it is diagnostics, and pushing it would be traffic for its own
+  // sake.
   $effect(() => {
     let running = true;
     let last: StatsDto | null = null;

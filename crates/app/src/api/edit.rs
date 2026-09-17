@@ -44,10 +44,8 @@ pub struct TrimDto {
     pub frame: usize,
 }
 
-/// One method per `Edit`, each taking a set of clips.
-///
-/// `Edit::Place` is absent: it exists for loading and pasting, which name a
-/// source window the user never types.
+/// One method per `Edit`, each taking a set of clips. `Edit::Place` is
+/// absent: it names a source window the user never types.
 #[api(namespace = "edit")]
 pub trait EditApi {
     /// Probe a file and put the whole of it after everything already there.
@@ -57,13 +55,11 @@ pub trait EditApi {
     /// edge, pushing what follows later.
     async fn insert(&self, path: String, frame: usize) -> Result<(), String>;
 
-    /// Put clips where they are named. A `track` may be one past the last,
-    /// which starts a new one, and whatever is already in the way is shortened
-    /// to make room.
+    /// Put clips where they are named, shortening whatever is in the way. A
+    /// `track` one past the last starts a new one.
     ///
-    /// `continuing` says this is another step of the gesture that sent the
-    /// last one — a held arrow key repeating — and so belongs in the undo step
-    /// already open rather than in one of its own.
+    /// `continuing` means another step of the gesture that sent the last one,
+    /// so it belongs in the undo step already open.
     async fn move_clips(&self, clips: Vec<PlacementDto>, continuing: bool) -> Result<(), String>;
 
     /// Move one end of each clip, leaving the other where it is. A clip
@@ -80,9 +76,11 @@ pub trait EditApi {
     /// Remove clips, either leaving the gaps they held or closing them.
     async fn delete(&self, clips: Vec<u64>, ripple: bool) -> Result<(), String>;
 
-    /// Go back one version, answering with where the timeline was when that
-    /// version was current. Nothing when there was nowhere to go back to,
-    /// which is not an error.
+    /// Take a track in or out of playback, leaving its clips alone.
+    async fn enable_track(&self, track: usize, enabled: bool) -> Result<(), String>;
+
+    /// Go back one version, answering with where the timeline was then.
+    /// Nothing means there was nowhere to go, which is not an error.
     async fn undo(&self) -> Option<ViewDto>;
 
     /// Go forward one version, after an undo.
@@ -169,6 +167,10 @@ impl EditApi for Arc<State> {
         )
     }
 
+    async fn enable_track(&self, track: usize, enabled: bool) -> Result<(), String> {
+        apply(self, Edit::Enable { track, enabled })
+    }
+
     async fn undo(&self) -> Option<ViewDto> {
         step(self, |history, current| history.undo(current))
     }
@@ -217,8 +219,7 @@ fn change(state: &State, continuing: bool, edit: Edit) -> Result<(), String> {
     Ok(())
 }
 
-/// Undo and redo differ only in which end they take from. Hands back the view
-/// recorded with that version, or nothing when there was no step to take.
+/// Undo and redo differ only in which end they take from.
 fn step(
     state: &State,
     take: impl FnOnce(&mut History<Version>, Version) -> Option<Version>,
@@ -237,21 +238,15 @@ fn step(
     drop(slot);
 
     publish(state, there.timeline);
-    // An undo moves the document too: back to a version the disk may well
-    // have, but not one we can tell apart from any other without comparing.
     crate::api::project::touch(state);
     Some(there.view)
 }
 
 /// Both halves: the canvas, so it redraws, and playback, so the frames keep
-/// matching. The timeline lock is released first — playback's queue is the one
-/// place the two could otherwise be taken in the opposite order.
+/// matching. Called with the timeline lock released — playback's queue is the
+/// one place the two could be taken in the opposite order.
 pub fn publish(state: &State, timeline: Arc<Timeline>) {
-    if let Some(events) = state.events.get() {
-        events
-            .timeline
-            .emit_changed(&crate::api::timeline::dto(&timeline));
-    }
+    crate::api::timeline::publish(state, &timeline);
 
     if let Some(controls) = state.session.controls.lock().unwrap().as_mut() {
         controls.send(Request::Open(timeline));

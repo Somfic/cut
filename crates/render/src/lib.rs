@@ -11,9 +11,8 @@ pub struct FrameRenderer {
     bind_group_layout: wgpu::BindGroupLayout,
     uniform_buffer: wgpu::Buffer,
     texture: Option<FrameTexture>,
-    /// The frame currently in `texture`. Held (rather than compared by value)
-    /// so pointer equality is sound: while this `Arc` is alive, no other frame
-    /// can reuse its address.
+    /// Held, not compared by value: while this `Arc` is alive no other frame
+    /// can reuse its address, which is what makes `ptr_eq` sound.
     uploaded: Option<Arc<Frame>>,
 }
 
@@ -133,9 +132,8 @@ impl FrameRenderer {
 
 impl FrameRenderer {
     pub fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &Arc<Frame>) {
-        // Redraws happen far more often than frames arrive — animations run at
-        // display rate, video at 24-30fps — and re-uploading planes for a
-        // picture that hasn't changed costs megabytes of bandwidth per redraw.
+        // Redraws outnumber frames — display rate against 24-30fps — and
+        // re-uploading an unchanged picture costs megabytes each time.
         if self
             .uploaded
             .as_ref()
@@ -147,9 +145,8 @@ impl FrameRenderer {
 
         let size = (frame.width, frame.height);
 
-        // The raw 16-bit P010 planes are uploaded reinterpreted as byte
-        // channels (no CPU repacking): the shader reads the high byte. NV12 is
-        // already 8-bit. All of these are core, filterable formats.
+        // P010's 16-bit planes go up reinterpreted as byte channels, no CPU
+        // repacking: the shader reads the high byte. NV12 is already 8-bit.
         let (y_format, uv_format) = match frame.layout {
             PixelLayout::P010 => (
                 wgpu::TextureFormat::Rg8Unorm,
@@ -270,8 +267,8 @@ impl FrameRenderer {
         );
     }
 
-    /// What is currently on the GPU. A caller that uploads and presents on
-    /// different threads no longer has the `Frame` to ask by the time it draws.
+    /// What is on the GPU: a caller that uploads and presents on different
+    /// threads has no `Frame` left to ask by the time it draws.
     pub fn uploaded_size(&self) -> Option<(u32, u32)> {
         self.texture.as_ref().map(|texture| texture.size)
     }

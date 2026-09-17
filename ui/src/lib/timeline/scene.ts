@@ -5,6 +5,9 @@ import type { Placement } from "./geometry";
 /** How long a clip takes to travel to where an edit put it. */
 const GLIDE = 110;
 
+/** How long a track takes to dim when it is switched off, and to come back. */
+const DIM = 150;
+
 export type Shown = {
   clip: ClipDto;
   track: number;
@@ -14,12 +17,13 @@ export type Shown = {
   present: EasedNumber;
   selected: EasedNumber;
   hovered: EasedNumber;
+  /** 1 while the track plays, 0 once it is switched off. */
+  enabled: EasedNumber;
 };
 
 /**
  * What the canvas shows, which lags what the document says: an edit moves a
- * clip in one step and this walks it there. Entries outlive their clips, so a
- * deleted one fades out where it stood.
+ * clip in one step and this walks it there. Entries outlive their clips.
  */
 export class Scene {
   readonly clips = new Map<number, Shown>();
@@ -34,12 +38,18 @@ export class Scene {
 
   #painted = 0;
 
-  show(clip: ClipDto, track: number, selected: boolean, hovered: boolean) {
+  show(
+    clip: ClipDto,
+    track: number,
+    selected: boolean,
+    hovered: boolean,
+    enabled: boolean,
+  ) {
     let it = this.clips.get(clip.id);
 
     if (!it) {
-      // Only presence starts from nothing: a clip scrolling into view was
-      // already selected and already where it is.
+      // Only presence starts from nothing: a clip scrolling into view is
+      // already where it is.
       it = {
         clip,
         track,
@@ -49,6 +59,7 @@ export class Scene {
         present: new EasedNumber(0),
         selected: new EasedNumber(+selected),
         hovered: new EasedNumber(+hovered),
+        enabled: new EasedNumber(+enabled, DIM),
       };
       this.clips.set(clip.id, it);
     }
@@ -61,6 +72,7 @@ export class Scene {
     it.present.to(1);
     it.selected.to(+selected);
     it.hovered.to(+hovered);
+    it.enabled.to(+enabled);
   }
 
   /** Leave clips where a gesture put them, with no journey to make. */
@@ -77,8 +89,8 @@ export class Scene {
 
   /** Move everything on. True while any of it is still travelling. */
   advance(present: Set<number>): boolean {
-    // A backgrounded tab hands back a vast delta; capped, so the first frame
-    // back lands rather than leaps.
+    // A backgrounded tab hands back a vast delta: capped, or the first frame
+    // back leaps.
     const now = performance.now();
     const dt = wants_no_animations() ? 1e6 : Math.min(now - this.#painted, 100);
     this.#painted = now;
@@ -98,7 +110,15 @@ export class Scene {
 
       // Every one advanced: `||` would freeze whichever came second.
       moving =
-        [it.position, it.length, it.lane, it.present, it.selected, it.hovered]
+        [
+          it.position,
+          it.length,
+          it.lane,
+          it.present,
+          it.selected,
+          it.hovered,
+          it.enabled,
+        ]
           .map((eased) => eased.advance(dt))
           .some(Boolean) || moving;
     }

@@ -12,10 +12,8 @@ pub const DEFAULT_TIMEBASE: Fraction = Fraction::new_raw(30, 1);
 
 #[derive(Clone)]
 pub struct Timeline {
-    /// The rate `Clip::position` and `Clip::length` are counted in. Playback
-    /// still maps frames through each clip's own source rate, so today this is
-    /// only declared and carried — it is what mixed-rate sources will be
-    /// conformed *to*, and it has to survive a save to be worth anything.
+    /// The rate positions and lengths are counted in. Carried, not yet
+    /// enforced: playback still maps frames through each clip's source rate.
     pub timebase: Fraction,
     pub tracks: Vec<Track>,
     /// The last id handed out.
@@ -33,11 +31,8 @@ impl Default for Timeline {
 }
 
 impl Timeline {
-    /// The document as this edit would leave it, or why it cannot.
-    ///
-    /// The copy is what makes a refusal clean: an edit over a set of clips can
-    /// give up part-way. Callers hold the document behind an `Arc` and need an
-    /// owned one to publish anyway.
+    /// The document as this edit would leave it, or why it cannot. The copy
+    /// is what makes a refusal clean, since `apply` may stop half-way.
     pub fn applied(&self, edit: Edit) -> anyhow::Result<Timeline> {
         let mut next = self.clone();
         next.apply(edit)?;
@@ -46,11 +41,7 @@ impl Timeline {
     }
 
     /// Change the document in place, upholding the invariants a project file
-    /// is checked against when it loads.
-    ///
-    /// May stop half-way: a set of clips is dealt with one at a time, and the
-    /// first refusal abandons the rest. Anything that cannot live with that
-    /// wants `applied`.
+    /// is checked against as it loads. May stop half-way — see `applied`.
     pub fn apply(&mut self, edit: Edit) -> anyhow::Result<()> {
         match edit {
             Edit::Place {
@@ -96,6 +87,15 @@ impl Timeline {
                 }
             }
 
+            Edit::Enable { track, enabled } => {
+                let lane = self
+                    .tracks
+                    .get_mut(track)
+                    .with_context(|| format!("there is no track {track}"))?;
+
+                lane.enabled = enabled;
+            }
+
             Edit::Delete { clips, ripple } => {
                 for clip in clips {
                     let (t, index) = self.locate(clip)?;
@@ -124,11 +124,9 @@ impl Timeline {
         self.tracks.iter().flat_map(|t| t.clip_at(frame)).collect()
     }
 
-    /// The first frame at or after `frame` that a clip covers, wrapping round to
-    /// wherever the document starts. `None` when there is nothing to play.
-    ///
-    /// Moving or deleting a clip leaves a hole with nothing in it to decode, so
-    /// playback needs somewhere to land other than the middle of one.
+    /// The first frame at or after `frame` that a clip covers, wrapping to the
+    /// start of the document. `None` when there is nothing to play: an edit
+    /// can leave a hole with nothing in it to decode.
     pub fn next_content(&self, frame: usize) -> Option<usize> {
         let clips = || self.tracks.iter().flat_map(|track| &track.clips);
 
@@ -159,8 +157,7 @@ impl Timeline {
             .unwrap_or(0)
     }
 
-    /// Move one end of one clip. The body of `Edit::Trim`, kept apart so a
-    /// group trim runs the same checks rather than a second copy of them.
+    /// One end of one clip, so a group trim runs these checks once written.
     fn trim(&mut self, clip: ClipId, edge: Edge, frame: usize) -> anyhow::Result<()> {
         let (t, index) = self.locate(clip)?;
         let trimmed = &self.tracks[t].clips[index];
@@ -172,9 +169,8 @@ impl Timeline {
                     bail!("an in-point has to come before its out-point");
                 }
 
-                // The window into the source moves with the in-point;
-                // the out-point stays where it is. These two have to
-                // move together or the clip plays the wrong frames.
+                // The window into the source moves with the in-point, or the
+                // clip plays the wrong frames.
                 let shift = frame as isize - trimmed.position as isize;
                 let source_start = trimmed.source_start as isize + shift;
 
@@ -206,7 +202,7 @@ impl Timeline {
             }
         };
 
-        // Lifted before the room is judged, or a clip growing by a frame is
+        // Lifted before the room is judged, or a clip growing a frame is
         // found to be in its own way.
         let mut trimmed = self.tracks[t].clips.remove(index);
         self.clear_span(t, position, position + length)?;
@@ -219,10 +215,8 @@ impl Timeline {
         Ok(())
     }
 
-    /// Trim to `frame` and pull everything after back into the space.
-    ///
-    /// The clip keeps the position it had: a head trim moves its start to
-    /// `frame`, and closing the gap moves it back to where it began.
+    /// Trim to `frame` and pull everything after back into the space, which
+    /// leaves the clip itself where it started.
     fn ripple_trim(&mut self, clip: ClipId, edge: Edge, frame: usize) -> anyhow::Result<()> {
         let (t, index) = self.locate(clip)?;
         let trimmed = &self.tracks[t].clips[index];
@@ -254,7 +248,7 @@ impl Timeline {
             bail!("frame {frame} is not inside that clip");
         }
 
-        // Read the halves out before minting, which needs the document back.
+        // Read out before minting, which borrows the document mutably.
         let head = frame - split.position;
         let source = split.source.clone();
         let source_start = split.source_frame(frame);
@@ -277,9 +271,8 @@ impl Timeline {
         Ok(())
     }
 
-    /// The overwrite rule, spelled out once: a clip covered at one end is
-    /// trimmed back, one covered down the middle is split around the span, and
-    /// one covered end to end is removed.
+    /// The overwrite rule: covered at one end trims, down the middle splits,
+    /// end to end removes.
     fn clear_span(&mut self, track: usize, from: usize, to: usize) -> anyhow::Result<()> {
         let Some(lane) = self.tracks.get(track) else {
             return Ok(());
@@ -314,9 +307,9 @@ impl Timeline {
         Ok(())
     }
 
-    /// Every clip comes out before any goes back in, which is the whole
-    /// reason a move takes a set: a group shuffling within its own span would
-    /// be refused by the room it is itself about to vacate.
+    /// Every clip comes out before any goes back in — which is why a move
+    /// takes a set: a group shuffling within its own span would otherwise be
+    /// refused by the room it is about to vacate.
     fn relocate(&mut self, clips: &[Placement]) -> anyhow::Result<()> {
         let mut lifted = Vec::with_capacity(clips.len());
         for placement in clips {
@@ -341,8 +334,8 @@ impl Timeline {
         Ok(())
     }
 
-    /// The one way a clip comes into the document, and so the one place an id
-    /// is minted.
+    /// The one way a clip enters the document, and so the one place an id is
+    /// minted.
     fn place(
         &mut self,
         track: usize,
@@ -371,9 +364,8 @@ impl Timeline {
             bail!("that would land on the clip at frame {over}");
         }
 
-        // The first media in an empty document decides what its frames count
-        // in. Loading a project sets the timebase itself, afterwards, from what
-        // the file says.
+        // The first media in an empty document sets the timebase; loading a
+        // project overwrites it afterwards with what the file says.
         if self.tracks.iter().all(|track| track.clips.is_empty()) {
             self.timebase = source.frame_rate;
         }
@@ -393,11 +385,10 @@ impl Timeline {
         Ok(id)
     }
 
-    /// Put `clip` on `track` in position order, starting the track if it is one
-    /// past the last.
+    /// In position order, starting the track if it is one past the last.
     fn insert(&mut self, track: usize, clip: Clip) {
         if track == self.tracks.len() {
-            self.tracks.push(Track { clips: Vec::new() });
+            self.tracks.push(Track::default());
         }
 
         let clips = &mut self.tracks[track].clips;
@@ -405,8 +396,8 @@ impl Timeline {
         clips.insert(index, clip);
     }
 
-    /// Shift everything from `frame` on by `by`, on every track, so a ripple
-    /// keeps the tracks lined up with each other.
+    /// Shift everything from `frame` on, across every track, so a ripple
+    /// keeps them lined up with each other.
     fn ripple(&mut self, frame: usize, by: isize) {
         for track in &mut self.tracks {
             for clip in &mut track.clips {
@@ -432,14 +423,10 @@ impl Timeline {
             .context("that clip is not in the timeline")
     }
 
-    /// Where a clip already on `track` runs through `position..position + length`,
-    /// if one does. `ignore` is the clip being moved, which cannot be in its own
-    /// way.
-    ///
-    /// Leans on what `apply` guarantees: clips on a track are in position order
-    /// and never overlap, so their ends rise with their positions and the only
-    /// candidates are the few starting before `end`. Every drag will ask this
-    /// question once per mouse move, so it is worth not walking the track.
+    /// Where a clip already on `track` runs through `position..position +
+    /// length`, ignoring the one being moved. Binary search rather than a
+    /// walk: a drag asks this once per mouse move, and `apply` guarantees
+    /// clips are ordered and never overlap.
     fn covering(
         &self,
         track: usize,

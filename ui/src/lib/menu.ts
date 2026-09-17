@@ -36,17 +36,12 @@ const step = (what: string, go: () => Promise<ViewDto | null>) => async () => {
   api.transport.seek(view.playhead);
 };
 
-/** A ripple closes one gap, so it acts on one clip under the playhead. */
 /** One clip: the selected one under the playhead, or whichever is under it. */
 const trim_target = (c: MenuContext) =>
   c.playhead_clips.find((clip) => c.selected_clips.includes(clip)) ??
   c.playhead_clips[0];
 
-/**
- * Trim an edge to the playhead, closing the gap or leaving it depending on
- * the mode. Rippling is one clip's business either way: it closes one gap,
- * and two edit points give two answers for how far the rest should move.
- */
+/** Trim an edge to the playhead, closing the gap or leaving it by mode. */
 function trim(c: MenuContext, edge: EdgeDto) {
   const clip = trim_target(c);
   if (!clip) return;

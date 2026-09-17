@@ -1,4 +1,5 @@
 <script lang="ts">
+  import TrackHeaders from "./TrackHeaders.svelte";
   import api from "$lib/api";
   import { document } from "$lib/document.svelte";
   import { mode } from "$lib/mode.svelte";
@@ -40,6 +41,7 @@
   const view = (): Viewport => ({ scroll, zoom });
   const xOf = (frame: number) => xOfIn(view(), frame);
   const frameAt = (x: number) => frameAtIn(view(), x);
+  const seekTo = (event: PointerEvent) => playhead.seek(frameAt(event.offsetX));
 
   const scene = new Scene();
 
@@ -88,7 +90,13 @@
     timeline?.tracks.forEach((lane, track) => {
       for (const clip of lane.clips) {
         present.add(clip.id);
-        scene.show(clip, track, selected.has(clip.id), clip.id === hover && !drag);
+        scene.show(
+          clip,
+          track,
+          selected.has(clip.id),
+          clip.id === hover && !drag,
+          lane.enabled,
+        );
       }
     });
 
@@ -138,7 +146,7 @@
   $effect(() => {
     const observer = new ResizeObserver(([entry]) => {
       const { width: w, height: h } = entry.contentRect;
-      // A repeat is a buffer reallocation and a repaint for nothing.
+      // A repeat is a reallocation and a repaint for nothing.
       if (w === width && h === height) return;
 
       [width, height] = [w, h];
@@ -194,8 +202,8 @@
 
   /**
    * A trackpad sends small, often fractional deltas and a horizontal axis; a
-   * mouse sends ±120 notches. Remembered for a moment, since a fast flick
-   * does produce the occasional round, axis-aligned event.
+   * mouse sends ±120 notches. Remembered for a moment: a fast flick does
+   * produce the occasional round, axis-aligned event.
    */
   let trackpadUntil = 0;
 
@@ -323,8 +331,8 @@
 
     const grabbed = timeline && hit(timeline, view(), event.offsetX, event.offsetY);
     if (grabbed) {
-      // A plain press replaces the selection, unless the clip is in it —
-      // dragging a group must not collapse it to the clip taken hold of.
+      // A plain press replaces the selection, unless the clip is in it: a
+      // group must not collapse to the clip taken hold of.
       if (event.shiftKey || event.metaKey) selection.toggle(grabbed.clip);
       else if (!selection.has(grabbed.clip)) selection.set(grabbed.clip);
 
@@ -334,12 +342,12 @@
     }
 
     if (!event.shiftKey && !event.metaKey) selection.clear();
-    playhead.seek(frameAt(event.offsetX));
+    seekTo(event);
   }
 
   function onPointerMove(event: PointerEvent) {
     if (scrubbing) {
-      playhead.seek(frameAt(event.offsetX));
+      seekTo(event);
       return;
     }
 
@@ -366,7 +374,7 @@
     }
 
     if (event.buttons & 1) {
-      playhead.seek(frameAt(event.offsetX));
+      seekTo(event);
       return;
     }
 
@@ -393,7 +401,7 @@
       const { idle } = pan;
       pan = null;
       cursor = "grab";
-      if (idle) playhead.seek(frameAt(event.offsetX));
+      if (idle) seekTo(event);
       return;
     }
 
@@ -411,9 +419,8 @@
     if (carried.edge) {
       const edge = carried.edge;
 
-      // A ripple closes one gap, so it is only an answer for one clip — and
-      // only when the trim took frames away. A clip growing has no gap to
-      // close; it overwrites what it grows into, as it does with the mode off.
+      // A ripple answers for one clip, and only when the trim took frames
+      // away: a clip growing has no gap to close.
       const [only] = landed;
       if (mode.ripple && landed.length === 1 && only.length < carried.held.length) {
         api.edit.ripple(only.id, edge, edgeOf(only, edge));
@@ -446,32 +453,40 @@
   }
 </script>
 
-<div class="wrap" bind:this={wrap}>
-  <canvas
-    bind:this={canvas}
-    style="cursor: {cursor}"
-    onwheel={onWheel}
-    onpointerdown={onPointerDown}
-    onpointermove={onPointerMove}
-    onpointerup={onPointerUp}
-    onpointercancel={onPointerCancel}
-  ></canvas>
+<div class="timeline">
+  <TrackHeaders tracks={timeline?.tracks ?? []} />
+
+  <div class="wrap" bind:this={wrap}>
+    <canvas
+      bind:this={canvas}
+      style="cursor: {cursor}"
+      onwheel={onWheel}
+      onpointerdown={onPointerDown}
+      onpointermove={onPointerMove}
+      onpointerup={onPointerUp}
+      onpointercancel={onPointerCancel}
+    ></canvas>
+  </div>
 </div>
 
 <style>
-  .wrap {
+  .timeline {
+    display: flex;
     flex: none;
     height: 180px;
-    background: var(--glow-bg-surface);
     border-top: 1px solid var(--glow-border-color);
+  }
+
+  .wrap {
+    flex: 1;
+    min-width: 0;
+    background: var(--glow-bg-surface);
     overflow: hidden;
   }
 
-  /* Sized by the wrap rather than by the size the observer measured:
-     mirroring that back into an inline width resizes the element from inside
-     the observer's own callback, which is the loop the browser complains
-     about. `width` and `height` are the backing store and what the painting
-     is laid out against, nothing the page's layout depends on. */
+  /* Sized by the wrap, not by what the observer measured: mirroring that
+     back into an inline width resizes the element from inside the observer's
+     own callback, and the browser complains about the loop. */
   canvas {
     display: block;
     width: 100%;

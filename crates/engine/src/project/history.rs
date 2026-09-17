@@ -1,15 +1,9 @@
 /// How many versions back undo reaches.
 const DEPTH: usize = 200;
 
-/// Undo, by keeping the versions themselves rather than inverses of the edits.
-///
-/// A document already lives behind an `Arc` and an edit clones it, so a version
-/// costs one clip list — every source is shared — and going back is a pointer
-/// swap. It also means undo cannot disagree with what an edit actually did.
-///
-/// What a version *is* belongs to whoever is keeping the history: the document
-/// alone here, the document and where the user was looking at it in the app.
-/// Nothing below reads the thing it is holding.
+/// Undo by keeping whole versions rather than inverses of the edits: a
+/// document is behind an `Arc`, so a version costs one clip list and going
+/// back is a pointer swap. Nothing here reads what it holds.
 pub struct History<T> {
     past: Vec<T>,
     future: Vec<T>,
@@ -25,7 +19,7 @@ impl<T> Default for History<T> {
 }
 
 impl<T> History<T> {
-    /// Record the version as it was *before* the edit about to be published.
+    /// The version as it was *before* the edit about to be published.
     pub fn record(&mut self, previous: T) {
         self.past.push(previous);
 
@@ -37,9 +31,8 @@ impl<T> History<T> {
         self.future.clear();
     }
 
-    /// Fold what is about to be published into the version already recorded,
-    /// for a gesture that arrives as a run of edits — a held arrow key. False
-    /// when there is nothing to fold into, which is the cue to record.
+    /// Fold the next edit into the version already recorded, for a gesture
+    /// that arrives as a run — a held arrow key. False means record instead.
     pub fn amend(&mut self) -> bool {
         if self.past.is_empty() {
             return false;
@@ -112,8 +105,6 @@ mod tests {
 
     #[test]
     fn nothing_recorded_yet_cannot_be_amended() {
-        // The caller records instead, so a run that starts before anything
-        // else has happened still has somewhere to go back to.
         assert!(!Versions::default().amend());
     }
 

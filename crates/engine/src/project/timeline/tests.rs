@@ -244,7 +244,7 @@ fn a_ripple_trim_of_the_tail_pulls_what_follows_back() {
 
 #[test]
 fn a_ripple_trim_needs_the_frame_inside_the_clip() {
-    let mut timeline = pair();
+    let timeline = pair();
     let first = ids(&timeline)[0];
     let before = windows(&timeline, 0);
 

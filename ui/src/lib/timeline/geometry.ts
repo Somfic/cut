@@ -1,7 +1,5 @@
-// Where the document lands on screen, and what the pointer is over.
-//
-// Feedback only: the engine re-checks every edit, so a wrong answer here
-// bounces an edit rather than corrupting anything.
+// Where the document lands on screen, and what the pointer is over. Feedback
+// only: the engine re-checks every edit.
 
 export const RULER_HEIGHT = 26;
 export const TRACK_HEIGHT = 54;
@@ -110,11 +108,9 @@ export function hit(
 }
 
 /**
- * Every frame a gesture could land flush against, sorted, from every track:
- * clips are cut against each other across lanes as much as along them.
- *
- * Built once per drag — rebuilding it at pointer rate was the most expensive
- * thing a drag did.
+ * Every frame a gesture could land flush against, sorted, from every track.
+ * Built once per drag: at pointer rate it was the most expensive thing one
+ * did.
  */
 export function snapCandidates(
   timeline: Timeline,
@@ -137,8 +133,8 @@ export type Snap = { pull: number; at: number | null };
 
 /**
  * How far to pull a gesture so an edge it carries lands flush on one staying
- * put. Every carried edge counts, not just the grabbed clip's: snapping by
- * the clip under the pointer slides the rest through their own alignments.
+ * put. Every carried edge counts: snapping by the clip under the pointer
+ * slides the rest through their own alignments.
  */
 export function snapDelta(
   candidates: number[],
@@ -185,7 +181,6 @@ function nearest(edges: number[], frame: number): number {
   return Math.max(0, low - 1);
 }
 
-/** Where a clip would sit once a drag lands. */
 /** Where a clip sits, or would sit once a drag lands. */
 export type Placement = Span & { id: number; track: number };
 
@@ -215,8 +210,8 @@ export function covered(timeline: Timeline, group: Placement[]): Placement[] {
 
 /**
  * How far a trim can go: its own end, and what the source has. Neighbours are
- * not walls — growing into one shortens it, as a drop does — which is what
- * lets a handle move at all in a document with no gaps in it.
+ * not walls — growing into one shortens it — or a handle could not move at
+ * all in a document with no gaps.
  */
 export function trimRange(
   timeline: Timeline,

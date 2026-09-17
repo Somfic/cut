@@ -34,7 +34,7 @@ fn main() -> anyhow::Result<()> {
         .invoke_handler(invoke_handler())
         .build(tauri::generate_context!())?;
 
-    // the dialogs need it, and it only exists once the app is built
+    // the dialogs hang off it, and it exists only once the app is built
     state
         .handle
         .set(app.handle().clone())
@@ -130,10 +130,9 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Tauri's default menu bar, minus the items whose keys the app answers
-/// itself: its Edit submenu claims ⌘Z for AppKit's own undo, and a key
-/// equivalent is matched before the webview ever sees it. The clipboard items
-/// stay — they are what makes ⌘C work in a text field.
+/// The default menu bar, minus the items whose keys the app answers itself:
+/// AppKit matches ⌘Z before the webview sees it. The clipboard items stay,
+/// since they are what makes ⌘C work in a text field.
 fn menu(handle: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let app = Submenu::with_items(
         handle,

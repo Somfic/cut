@@ -1,25 +1,17 @@
-import api, { type ProjectDto } from "./api";
+import api from "./api";
+import { sync } from "./live";
 
 /** Which file is open, and whether it has everything the session has done. */
 class Project {
-  name = $state("Untitled");
+  name = $state("Untitled.cut");
   path = $state<string | null>(null);
   saved = $state(true);
 }
 
-function live(): Project {
-  const project = new Project();
+export const project = new Project();
 
-  const take = (p: ProjectDto) => {
-    project.name = p.name;
-    project.path = p.path ?? null;
-    project.saved = p.saved;
-  };
-
-  api.project.get().then(take);
-  api.projectEvents.onChanged(take);
-
-  return project;
-}
-
-export const project = live();
+sync(api.project.get, api.projectEvents.onChanged, (p) => {
+  project.name = p.name;
+  project.path = p.path ?? null;
+  project.saved = p.saved;
+});

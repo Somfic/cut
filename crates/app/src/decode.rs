@@ -15,10 +15,9 @@ pub fn spawn_decoder(shared: Arc<State>, project: std::path::PathBuf) {
             let mut since = Instant::now();
 
             loop {
-                // Four times a second, because this is the correction the
-                // front end's own clock is steered by: it counts frames
-                // locally between these, and a whole second of free-running
-                // is a second of drift to swallow in one step.
+                // Four times a second: the front end counts frames locally
+                // between these, and a second of free-running is a second of
+                // drift to swallow in one step.
                 std::thread::sleep(std::time::Duration::from_millis(250));
 
                 crate::api::transport::publish(&shared);
@@ -58,17 +57,8 @@ pub fn spawn_decoder(shared: Arc<State>, project: std::path::PathBuf) {
                             *state.session.controls.lock().unwrap() = Some(controls);
                         }
                         playback::Event::Opened { timeline, on_disk } => {
-                            if let Some(events) = state.events.get() {
-                                events
-                                    .timeline
-                                    .emit_changed(&crate::api::timeline::dto(&timeline));
-                            }
+                            crate::api::timeline::publish(&state, &timeline);
                             *state.session.timeline.lock().unwrap() = Some(timeline);
-
-                            // The demo fallback is a document nothing has
-                            // written yet: calling it unsaved is what has
-                            // autosave give the project its file, a couple of
-                            // seconds later.
                             crate::api::project::opened(&state, on_disk);
                         }
                         playback::Event::Frame(frame) => {

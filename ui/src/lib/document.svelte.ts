@@ -1,4 +1,5 @@
 import api, { type TimelineDto } from "./api";
+import { sync } from "./live";
 
 /** The document, as the engine last sent it. */
 class Document {
@@ -14,14 +15,8 @@ class Document {
   }
 }
 
-function live(): Document {
-  const document = new Document();
+export const document = new Document();
 
-  // Pushed on every edit; this call is only the fetch before the first event.
-  api.timeline.get().then((t) => (document.timeline = t));
-  api.timelineEvents.onChanged((t) => (document.timeline = t));
-
-  return document;
-}
-
-export const document = live();
+sync(api.timeline.get, api.timelineEvents.onChanged, (t) => {
+  document.timeline = t;
+});

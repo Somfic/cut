@@ -1,13 +1,7 @@
-//! The on-disk project format.
-//!
-//! Its own set of types rather than `#[derive(Serialize)]` on `Timeline` and
-//! friends, for three reasons. A clip refers to its source by index into a
-//! table, so four hundred clips over three files write three source entries
-//! and share three `Arc<Source>` again on load — which the playback layer
-//! relies on, since it keys its decoders by path. `Source` is *probe output*
-//! rather than something the user authored, and does not belong in a document
-//! as though it were. And the schema below can stay a stable contract while
-//! the runtime types are still moving.
+//! The on-disk project format: its own types, so clips can share a source
+//! table — playback keys its decoders by path and needs those `Arc`s shared
+//! again on load — and so the schema stays stable while the runtime types
+//! move.
 
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -53,18 +47,25 @@ struct Document {
 
 #[derive(Serialize, Deserialize)]
 struct SourceEntry {
-    /// Relative to the project file when the media sits under it, so a project
-    /// that travels with its media opens on another machine.
+    /// Relative when the media sits under the project, so the two travel
+    /// together.
     path: PathBuf,
-    /// What the file measured as when this project was saved. Every offset
-    /// below is a frame index, so these two are what those indices meant.
+    /// What the file measured as when this was saved: every offset below is a
+    /// frame index, and these are what those indices meant.
     fps: Rational,
     duration_ns: u64,
 }
 
 #[derive(Serialize, Deserialize)]
 struct TrackEntry {
+    /// Absent before tracks could be switched off, and those all played.
+    #[serde(default = "playing")]
+    enabled: bool,
     clips: Vec<ClipEntry>,
+}
+
+fn playing() -> bool {
+    true
 }
 
 #[derive(Serialize, Deserialize)]
@@ -76,8 +77,7 @@ struct ClipEntry {
     length: usize,
 }
 
-/// A frame rate, written as `[30000, 1001]` — exact, and readable when someone
-/// opens the file to see what a clip is doing.
+/// A frame rate, written as `[30000, 1001]`: exact, and readable.
 #[derive(Serialize, Deserialize, Clone, Copy)]
 struct Rational(i32, i32);
 
@@ -102,9 +102,8 @@ impl Rational {
 impl Document {
     fn from_timeline(timeline: &Timeline, base: &Path) -> Self {
         let mut sources: Vec<SourceEntry> = Vec::new();
-        // Two clips of the same file are two clips of one source, whether or
-        // not they happen to hold the same `Arc` — path is the identity the
-        // rest of the program uses, so it is the identity here too.
+        // Path is the identity the rest of the program uses, whether or not
+        // two clips of one file happen to hold the same `Arc`.
         let mut ids: HashMap<&Path, usize> = HashMap::new();
         let mut tracks = Vec::with_capacity(timeline.tracks.len());
 
@@ -131,7 +130,10 @@ impl Document {
                 });
             }
 
-            tracks.push(TrackEntry { clips });
+            tracks.push(TrackEntry {
+                enabled: track.enabled,
+                clips,
+            });
         }
 
         Document {
@@ -154,11 +156,13 @@ impl Document {
 
         let mut timeline = Timeline::default();
 
-        // The track count the file declares, up front: an empty track has to
-        // keep its place or every index below it means something else.
-        timeline.tracks = vec![Track { clips: Vec::new() }; self.tracks.len()];
+        // Up front: an empty track keeps its place, or every index below it
+        // means something else.
+        timeline.tracks = vec![Track::default(); self.tracks.len()];
 
         for (t, track) in self.tracks.iter().enumerate() {
+            timeline.tracks[t].enabled = track.enabled;
+
             for (c, entry) in track.clips.iter().enumerate() {
                 let source: Arc<Source> =
                     sources.get(entry.source).cloned().with_context(|| {
@@ -178,9 +182,8 @@ impl Document {
                     );
                 }
 
-                // A re-probe can round the frame count a frame differently than
-                // it did when this was saved. Trim to what is there rather than
-                // refuse to open the project over one frame.
+                // A re-probe can round the frame count differently. Trim to
+                // what is there rather than refuse over one frame.
                 let length = entry.length.min(available - entry.source_start);
                 if length != entry.length {
                     eprintln!(
@@ -191,8 +194,7 @@ impl Document {
                 }
 
                 // In through the same door as an edit, so a file cannot
-                // describe a document no gesture could have made: an empty
-                // clip, an in-point past the end, two clips over each other.
+                // describe a document no gesture could have made.
                 timeline
                     .apply(Edit::Place {
                         track: t,
@@ -212,9 +214,8 @@ impl Document {
         Ok(timeline)
     }
 
-    /// Probe every source up front. A project missing its media should say so
-    /// once, listing everything that is gone, rather than failing on whichever
-    /// file happens to come first.
+    /// Probe every source up front, so a project missing its media says so
+    /// once and lists all of it.
     fn resolve_sources(&self, base: &Path) -> anyhow::Result<Vec<Arc<Source>>> {
         let mut sources = Vec::with_capacity(self.sources.len());
         let mut unresolved = Vec::new();
@@ -239,10 +240,9 @@ impl Document {
         for (entry, source) in self.sources.iter().zip(&sources) {
             let saved = entry.fps.fraction()?;
 
-            // Playback has to use what the file measures now, or the decoder's
-            // frame arithmetic would disagree with the pictures coming out of
-            // it. So the stored rate is a check, and a disagreement means the
-            // offsets below no longer point where they were authored to point.
+            // Playback has to use what the file measures now, so the stored
+            // rate is only a check — a disagreement means the offsets no
+            // longer land where they were authored to.
             if saved != source.frame_rate {
                 eprintln!(
                     "warning: {} was {}/{} fps when this project was saved and is {}/{} now — \
@@ -269,8 +269,8 @@ fn base_dir(path: &Path) -> PathBuf {
 }
 
 fn relative_to(path: &Path, base: &Path) -> PathBuf {
-    // Both sides have to be real paths to compare: `base` may be `.`, and the
-    // media may have been opened through a relative path or a symlink.
+    // Both sides have to be real to compare: `base` may be `.`, and the media
+    // may have come through a relative path or a symlink.
     let (Ok(absolute), Ok(root)) = (path.canonicalize(), base.canonicalize()) else {
         return path.to_path_buf();
     };
@@ -289,8 +289,8 @@ fn resolve(stored: &Path, base: &Path) -> PathBuf {
     }
 }
 
-/// Write beside the target and rename over it. A crash halfway through a save
-/// then leaves the previous project intact instead of a half-written file.
+/// Write beside the target and rename over it, so a crash mid-save leaves the
+/// previous project intact.
 fn write_atomically(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     let name = path
         .file_name()
@@ -319,9 +319,8 @@ mod tests {
     const NTSC: (&str, &str, usize) = ("ntsc.mp4", "30000/1001", 60);
     const PAL: (&str, &str, usize) = ("pal.mp4", "25/1", 50);
 
-    /// Encode a couple of tiny clips beside a project file. The whole job of
-    /// this module is a round trip through real media: the frame rates have to
-    /// come back off an actual probe for a test of it to mean anything.
+    /// Two tiny clips beside a project file: the rates have to come back off
+    /// a real probe for a round trip to mean anything.
     fn fixture(name: &str) -> Option<PathBuf> {
         let dir = std::env::temp_dir().join(format!("cut-{name}"));
         fs::create_dir_all(&dir).ok()?;
@@ -368,8 +367,8 @@ mod tests {
         let ntsc = Arc::new(Source::new(dir.join(NTSC.0)).unwrap());
         let pal = Arc::new(Source::new(dir.join(PAL.0)).unwrap());
 
-        // The same source twice, so the round trip has to collapse it back to
-        // one entry and hand both clips the same `Arc` again.
+        // The same source twice: the round trip has to collapse it to one
+        // entry and share the `Arc` again.
         let mut before = Timeline::default();
         for (source, position, source_start, length) in [
             (ntsc.clone(), 0, 4, 10),
@@ -408,12 +407,51 @@ mod tests {
 
         assert!(Arc::ptr_eq(&restored[0].source, &restored[2].source));
 
+        // Two sources for three clips, addressed relative to the project, at
+        // an exact rate rather than 29.97.
         let json = fs::read_to_string(&path).unwrap();
-        // Two sources for three clips, media addressed relative to the project
-        // file, and the rate exact rather than divided out into 29.97.
         assert_eq!(json.matches(".mp4").count(), 2);
         assert!(json.contains("\"ntsc.mp4\""));
         assert!(json.contains("30000"), "{json}");
+    }
+
+    #[test]
+    fn keeps_a_track_switched_off() {
+        gstreamer::init().unwrap();
+
+        let Some(dir) = fixture("switched-off") else {
+            return;
+        };
+        let ntsc = Arc::new(Source::new(dir.join(NTSC.0)).unwrap());
+
+        let mut before = Timeline::default();
+        before
+            .apply(Edit::Place {
+                track: 0,
+                source: ntsc,
+                position: 0,
+                source_start: 0,
+                length: 10,
+            })
+            .unwrap();
+        before
+            .apply(Edit::Enable {
+                track: 0,
+                enabled: false,
+            })
+            .unwrap();
+
+        let path = dir.join("off.cut");
+        save(&before, &path).unwrap();
+
+        assert!(!load(&path).unwrap().tracks[0].enabled);
+    }
+
+    #[test]
+    fn a_track_written_before_the_flag_plays() {
+        let entry: TrackEntry = serde_json::from_str(r#"{"clips":[]}"#).unwrap();
+
+        assert!(entry.enabled);
     }
 
     #[test]

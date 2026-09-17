@@ -23,8 +23,7 @@ impl Player {
         }
     }
 
-    /// The clip this track is currently playing, if any. Decoded frames carry
-    /// source timestamps, so this is what maps them back onto the timeline.
+    /// The clip this track is playing, if any.
     pub fn live_clip(&self) -> Option<&Clip> {
         self.live_clip.as_ref()
     }
@@ -49,8 +48,8 @@ impl Player {
         self.sinks.audio_playing.load(Ordering::Relaxed)
     }
 
-    /// Seek the live decoder, returning where it actually landed. Re-basing the
-    /// master clock is the engine's job — one clock, one owner.
+    /// Seek the live decoder to where it lands. The clock has one owner, and
+    /// it is the engine.
     pub fn seek(
         &self,
         frame: usize,
@@ -76,7 +75,9 @@ impl Player {
 
         // if different source, swap active decoder
         if self.live_source.as_ref() != Some(&file) {
-            self.active_decoder().map(|d| d.pause());
+            if let Some(d) = self.active_decoder() {
+                d.pause();
+            }
 
             self.live_source = Some(file.clone());
 

@@ -23,6 +23,16 @@ pub struct State {
     pub window: Mutex<WindowDto>,
 }
 
+impl State {
+    /// Publish, if there is anywhere to publish to yet: the bus arrives with
+    /// the app, and the first events are emitted while it is still building.
+    pub fn emit(&self, event: impl FnOnce(&crate::generated::Events)) {
+        if let Some(events) = self.events.get() {
+            event(events);
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct FrameSlot {
     frame: Mutex<Option<Arc<Frame>>>,
@@ -74,12 +84,9 @@ pub struct Surface {
 #[derive(Default)]
 pub struct Session {
     pub timeline: Mutex<Option<Arc<Timeline>>>,
-    /// Versions behind the current one, and ahead of it after an undo. Lives
-    /// here rather than in the engine because it is per-session state —
-    /// nothing about it is written to the project file.
+    /// Per-session, not part of the document: none of it is ever written out.
     pub history: Mutex<History<Version>>,
-    /// Where the timeline was last left. Updated as the user pans and zooms,
-    /// and copied into a version whenever one is recorded.
+    /// Where the timeline was last left, copied into each recorded version.
     pub view: Mutex<ViewDto>,
     pub controls: Mutex<Option<Controls>>,
     pub fps: Mutex<f64>,
@@ -87,17 +94,15 @@ pub struct Session {
     pub project: Mutex<Project>,
 }
 
-/// The document's relationship with the disk. Separate from the timeline's
-/// own lock: a save reads the timeline and then releases it, and autosave
-/// asks "is there anything to write" far more often than it writes.
+/// The document's relationship with the disk, under its own lock: autosave
+/// asks whether there is anything to write far more often than it writes.
 #[derive(Default)]
 pub struct Project {
     /// Where a save goes. Absent until the user names one.
     pub path: Option<PathBuf>,
     /// Whether what is in memory is what is on disk.
     pub saved: bool,
-    /// When the last edit landed, so autosave can wait for a lull rather than
-    /// write once per keystroke of a held arrow key.
+    /// When the last edit landed, so autosave can wait for a lull.
     pub touched: Option<Instant>,
 }
 

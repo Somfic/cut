@@ -40,7 +40,7 @@ pub struct VideoStream(Receiver<Arc<Frame>>);
 
 impl VideoStream {
     pub fn drain(&mut self) {
-        while let Ok(_) = self.0.try_recv() {}
+        while self.0.try_recv().is_ok() {}
     }
 }
 

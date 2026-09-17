@@ -40,7 +40,5 @@ pub fn publish(state: &State, window: WindowDto) {
     *last = window;
     drop(last);
 
-    if let Some(events) = state.events.get() {
-        events.window.emit_changed(&window);
-    }
+    state.emit(|events| events.window.emit_changed(&window));
 }

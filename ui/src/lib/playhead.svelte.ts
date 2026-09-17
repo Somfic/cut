@@ -1,11 +1,9 @@
 import api from "./api";
+import { sync } from "./live";
 
 class Playhead {
   frame = $state(0);
-  /**
-   * The same position unrounded, for drawing: at a high zoom a frame is forty
-   * pixels, and stepping between them crawls. `frame` is what edits count in.
-   */
+  /** Unrounded, for drawing: a frame can be forty pixels wide. */
   exact = $state(0);
   playing = $state(false);
   fps = $state(24);
@@ -24,8 +22,8 @@ class Playhead {
     this.fps = t.fps;
     this.playing = t.playing;
 
-    // Seeking is asynchronous: until playback moves it keeps answering with
-    // where it still is, which throws a scrub back a frame at a time.
+    // Seeking is asynchronous: until playback moves it answers with where it
+    // still is, which throws a scrub back a frame at a time.
     if (this.#asked) {
       const arrived = Math.abs(t.playhead - this.#asked.frame) <= 2;
       if (!arrived && performance.now() < this.#asked.until) return;
@@ -41,8 +39,7 @@ class Playhead {
 
   /**
    * Where the user just dragged it, before the engine has answered. Each call
-   * renews the claim, so a drag holds the playhead for as long as it lasts —
-   * no start and end to keep in step with.
+   * renews the claim, so a drag holds it for as long as it lasts.
    */
   scrub(frame: number) {
     // Moving it by hand takes over from playback, rather than fighting it.
@@ -58,7 +55,7 @@ class Playhead {
     this.exact = frame;
   }
 
-  /** Put it somewhere: the engine, which decodes, and the clock that is drawn. */
+  /** Both halves: the engine, which decodes, and the clock that is drawn. */
   seek(frame: number) {
     this.scrub(frame);
     api.transport.seek(frame);
@@ -76,23 +73,14 @@ class Playhead {
   }
 }
 
-/**
- * Started once, here: the clock has to run whether or not anything is
- * watching it, and every correction the engine pushes lands in one place.
- */
-function live(): Playhead {
-  const playhead = new Playhead();
+export const playhead = new Playhead();
 
-  api.transport.state().then((t) => playhead.sync(t));
-  api.transportEvents.onChanged((t) => playhead.sync(t));
+// The clock runs whether or not anything is watching it, and every correction
+// the engine pushes lands in one place.
+sync(api.transport.state, api.transportEvents.onChanged, (t) => playhead.sync(t));
 
-  const tick = () => {
-    playhead.tick();
-    requestAnimationFrame(tick);
-  };
+const tick = () => {
+  playhead.tick();
   requestAnimationFrame(tick);
-
-  return playhead;
-}
-
-export const playhead = live();
+};
+requestAnimationFrame(tick);

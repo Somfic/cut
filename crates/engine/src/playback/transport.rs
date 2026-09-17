@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -13,18 +13,16 @@ use crate::playback::{Controls, Engine, PlaybackState, Request, SeekMode, VideoS
 use crate::project::{Timeline, file};
 use crate::stream;
 
-/// Everything the transport tells a front end about. Deliberately small: a
-/// front end renders these three things and drives the rest through
-/// [`Controls`], so it needs no view into the engine's internals.
+/// Everything the transport tells a front end about. The rest is driven
+/// through [`Controls`].
 #[derive(Clone)]
 pub enum Event {
     /// The handle for driving playback. Arrives once, first.
     Ready(Controls),
     Opened {
         timeline: Arc<Timeline>,
-        /// False when this came from the demo fallback instead of the project
-        /// file, which is what makes autosave write it out and gives the
-        /// project a file to begin with.
+        /// False for the demo fallback, which is what has autosave write the
+        /// project out and give it a file to begin with.
         on_disk: bool,
     },
     Frame(Arc<Frame>),
@@ -33,8 +31,8 @@ pub enum Event {
 const SEEK_TIMEOUT: Duration = Duration::from_millis(500);
 const PLAYBACK_STALL: Duration = Duration::from_secs(3);
 
-/// Move the timeline to `tl_frame`. Every seek, clip boundary and scrub goes
-/// through here, so there is one path from "I want this frame" to the decoders.
+/// One path from "I want this frame" to the decoders: every seek, clip
+/// boundary and scrub comes through here.
 fn cut(
     engine: &mut Engine,
     timeline: &Timeline,
@@ -47,8 +45,7 @@ fn cut(
     }
 }
 
-/// Read the project file, falling back to the demo timeline when nothing is
-/// there yet — saving over that fallback is how the first project gets written.
+/// The project file, or the demo timeline when there is nothing there yet.
 fn open(project: &Path) -> anyhow::Result<(Timeline, bool)> {
     if project.exists() {
         let timeline =
@@ -62,11 +59,10 @@ fn open(project: &Path) -> anyhow::Result<(Timeline, bool)> {
     }
 }
 
-// `use<>`: the returned stream owns a clone of the path and captures nothing
-// from the borrow, which is what lets this be the plain `fn(&D) -> S` pointer
-// `Subscription::run_with` wants.
-pub fn transport(project: &PathBuf) -> impl Stream<Item = Event> + use<> {
-    let project = project.clone();
+// `use<>`: the stream owns a clone of the path and captures nothing from the
+// borrow, which is what makes this a plain `fn(&D) -> S` pointer.
+pub fn transport(project: &Path) -> impl Stream<Item = Event> + use<> {
+    let project = project.to_path_buf();
 
     stream::channel(64, async move |mut output: Sender<Event>| {
         let (command_tx, mut command_rx) = mpsc::channel::<Request>(16);
@@ -94,14 +90,12 @@ pub fn transport(project: &PathBuf) -> impl Stream<Item = Event> + use<> {
 
         let mut length = timeline.length();
         if length == 0 {
-            // Not fatal: an empty document is what importing into a new
-            // project starts from.
+            // Not fatal: a new project starts here.
             eprintln!("timeline is empty — import some media");
         }
 
-        // Accurate: the seek's segment starts exactly at the in-point, so
-        // gstreamer drops both audio and video from the keyframe up to it —
-        // no leading video frames, and no unrelated leading audio.
+        // Accurate: the segment starts exactly at the in-point, so gstreamer
+        // drops the leading video and unrelated audio itself.
         cut(&mut engine, &timeline, 0, &mut stream, SeekMode::Accurate);
         engine.play();
 
@@ -128,9 +122,8 @@ pub fn transport(project: &PathBuf) -> impl Stream<Item = Event> + use<> {
                     Request::Open(opened) => {
                         timeline = opened;
                         length = timeline.length();
-                        // Stay where the playhead was if the new document
-                        // still reaches that far — an import appends, so it
-                        // usually does.
+                        // Stay where the playhead was, if the new document
+                        // still reaches that far.
                         parked = Some((
                             playhead.min(length.saturating_sub(1)),
                             SeekMode::Accurate,
@@ -154,31 +147,24 @@ pub fn transport(project: &PathBuf) -> impl Stream<Item = Event> + use<> {
                     // Which clip produced this frame — and its fps, since frame
                     // times are in that clip's own source, not the timeline's.
                     let Some((position, source_start, clip_len, fps)) = engine
-                        .live_clip(0)
+                        .leading_clip()
                         .map(|c| (c.position, c.source_start, c.length, c.source.fps()))
                     else {
                         continue;
                     };
                     let source_frame = (frame.time.as_secs_f64() * fps).round() as usize;
 
-                    // A KEY_UNIT seek lands on a keyframe at or before the
-                    // in-point. Drop the leading frames until we reach it: they
-                    // can be corrupt RASL pictures (they reference frames before
-                    // the random-access keyframe) and aren't the moment we asked
-                    // for. This also discards stragglers from the outgoing
-                    // decoder after a cross-source cut.
+                    // A KEY_UNIT seek lands at or before the in-point: drop
+                    // what comes first, which can be corrupt RASL pictures, and
+                    // stragglers from the decoder we cut away from.
                     if source_frame < source_start {
                         continue;
                     }
 
-                    // Played the clip's length → cut to the frame just past its
-                    // out-point, which is wherever the next clip begins (looping
-                    // at the end of the timeline). Timeline arithmetic, so the
-                    // worker never has to know about clip indices.
                     if source_frame >= source_start + clip_len {
-                        // Not simply the next frame along: a move or a delete
-                        // can leave a hole with nothing in it to decode, and
-                        // `next_content` wraps at the end of the document.
+                        // Played out: on to wherever the next clip begins. Not
+                        // the next frame along — an edit can leave a hole with
+                        // nothing in it to decode — and it wraps at the end.
                         let next = timeline.next_content(position + clip_len).unwrap_or(0);
                         cut(&mut engine, &timeline, next, &mut stream, SeekMode::Accurate);
                         in_flight = Some(Instant::now());
@@ -197,21 +183,16 @@ pub fn transport(project: &PathBuf) -> impl Stream<Item = Event> + use<> {
                         Delay::new(target - engine.position()).await;
                     }
 
-                    // After the wait, not before: the playhead should describe
-                    // the picture being shown. Published early it runs up to a
-                    // frame ahead of the preview, and the UI — which samples it
-                    // at display rate — sees it step at odd moments.
+                    // After the wait, not before: published early it runs a
+                    // frame ahead of the picture it is meant to describe.
                     state.set_playhead(timeline_frame);
                     if output.send(Event::Frame(frame)).await.is_err() { break; }
                 }
-                // Watchdog: if no frame arrives for a while, the pipeline has
-                // likely hit EOS (a clip window reached the end of the file) or
-                // a seek stalled. Advance to the next clip to recover instead of
-                // hanging forever. During normal playback frames arrive every
-                // ~40ms, so this never fires.
+                // Watchdog: no frame for seconds means EOS or a stalled seek,
+                // so move on rather than hang. Never fires while playing.
                 _ = Delay::new(PLAYBACK_STALL).fuse() => {
                     let next = engine
-                        .live_clip(0)
+                        .leading_clip()
                         .and_then(|c| timeline.next_content(c.position + c.length))
                         .unwrap_or(0);
                     cut(&mut engine, &timeline, next, &mut stream, SeekMode::Fast);

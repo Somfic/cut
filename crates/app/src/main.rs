@@ -6,9 +6,9 @@ use tauri::window::WindowBuilder;
 use tauri::{PhysicalPosition, RunEvent, TitleBarStyle, WindowEvent};
 
 mod api;
-mod decode;
 mod frontend;
 mod gpu;
+mod playback;
 mod state;
 
 const DEFAULT_PROJECT: &str = "project.cut";
@@ -96,8 +96,8 @@ fn main() -> anyhow::Result<()> {
         });
     }
 
-    // start decoder
-    decode::spawn_decoder(state.clone(), project);
+    // start playback
+    playback::spawn_playback(state.clone(), project);
 
     // start autosave
     api::project::spawn_autosave(state.clone());

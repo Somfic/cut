@@ -3,7 +3,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
-use cut_playback::{Controls, FrameSlot};
+use cut_playback::{FrameSlot, Transport};
 use cut_timeline::{History, Timeline};
 
 use crate::api::view::ViewDto;
@@ -48,7 +48,7 @@ pub struct Session {
     pub timeline: Mutex<Option<Arc<Timeline>>>,
     pub history: Mutex<History<HistoryEntry>>,
     pub view: Mutex<ViewDto>,
-    pub controls: Mutex<Option<Controls>>,
+    pub transport: Mutex<Option<Transport>>,
     pub fps: Mutex<f64>,
     pub project: Mutex<Project>,
 }

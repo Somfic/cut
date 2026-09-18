@@ -1,5 +1,5 @@
 use crate::state::State;
-use cut_playback::{Controls, Request, SeekMode};
+use cut_playback::{Command, SeekMode, Transport};
 use draad::{api, events, ty};
 use std::sync::Arc;
 
@@ -28,18 +28,18 @@ pub trait TransportApi {
 #[api]
 impl TransportApi for Arc<State> {
     async fn state(&self) -> TransportDto {
-        let controls = self.session.controls.lock().unwrap();
+        let transport = self.session.transport.lock().unwrap();
 
         TransportDto {
-            playhead: controls.as_ref().map_or(0, Controls::playhead),
-            playing: controls.as_ref().is_some_and(Controls::is_playing),
+            playhead: transport.as_ref().map_or(0, Transport::playhead),
+            playing: transport.as_ref().is_some_and(Transport::is_playing),
             fps: self.session.fps.lock().unwrap().max(1.0),
         }
     }
 
     async fn seek(&self, frame: usize) {
-        if let Some(controls) = self.session.controls.lock().unwrap().as_mut() {
-            controls.send(Request::Seek((frame, SeekMode::Accurate)));
+        if let Some(transport) = self.session.transport.lock().unwrap().as_mut() {
+            transport.send(Command::Seek((frame, SeekMode::Accurate)));
         }
 
         // The frame asked for: the request is queued, so reading the engine
@@ -54,13 +54,13 @@ impl TransportApi for Arc<State> {
     }
 
     async fn toggle(&self) {
-        let playing = match self.session.controls.lock().unwrap().as_mut() {
-            Some(controls) => {
-                controls.send(Request::TogglePlayback);
-                controls.is_playing()
+        let playing = match self.session.transport.lock().unwrap().as_mut() {
+            Some(transport) => {
+                transport.send(Command::TogglePlayback);
+                transport.is_playing()
             }
             None => {
-                eprintln!("toggle: no controls yet");
+                eprintln!("toggle: no transport yet");
                 return;
             }
         };
@@ -76,8 +76,8 @@ impl TransportApi for Arc<State> {
     }
 
     async fn pause(&self) {
-        if let Some(controls) = self.session.controls.lock().unwrap().as_mut() {
-            controls.send(Request::Pause);
+        if let Some(transport) = self.session.transport.lock().unwrap().as_mut() {
+            transport.send(Command::Pause);
         }
 
         announce(
@@ -91,11 +91,11 @@ impl TransportApi for Arc<State> {
 }
 
 pub fn dto(state: &State) -> TransportDto {
-    let controls = state.session.controls.lock().unwrap();
+    let transport = state.session.transport.lock().unwrap();
 
     TransportDto {
-        playhead: controls.as_ref().map_or(0, Controls::playhead),
-        playing: controls.as_ref().is_some_and(Controls::is_playing),
+        playhead: transport.as_ref().map_or(0, Transport::playhead),
+        playing: transport.as_ref().is_some_and(Transport::is_playing),
         fps: state.session.fps.lock().unwrap().max(24.0),
     }
 }

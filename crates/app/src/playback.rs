@@ -7,7 +7,7 @@ use futures::StreamExt;
 
 use crate::state::State;
 
-pub fn spawn_decoder(shared: Arc<State>, project: std::path::PathBuf) {
+pub fn spawn_playback(shared: Arc<State>, project: std::path::PathBuf) {
     {
         let shared = shared.clone();
         std::thread::spawn(move || {
@@ -49,12 +49,12 @@ pub fn spawn_decoder(shared: Arc<State>, project: std::path::PathBuf) {
         let state = shared.clone();
         std::thread::spawn(move || {
             futures::executor::block_on(async move {
-                let mut events = Box::pin(playback::transport(&project));
+                let mut events = Box::pin(playback::run(&project));
 
                 while let Some(event) = events.next().await {
                     match event {
-                        playback::Event::Ready(controls) => {
-                            *state.session.controls.lock().unwrap() = Some(controls);
+                        playback::Event::Ready(transport) => {
+                            *state.session.transport.lock().unwrap() = Some(transport);
                         }
                         playback::Event::Opened { timeline, on_disk } => {
                             crate::api::timeline::publish(&state, &timeline);

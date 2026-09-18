@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use cut_playback::Request;
+use cut_playback::Command;
 use cut_timeline::{ClipId, Edge, Edit, History, Placement, Source, Timeline, TrimTo};
 use draad::{api, ty};
 
@@ -247,8 +247,8 @@ fn step(
 pub fn publish(state: &State, timeline: Arc<Timeline>) {
     crate::api::timeline::publish(state, &timeline);
 
-    if let Some(controls) = state.session.controls.lock().unwrap().as_mut() {
-        controls.send(Request::Open(timeline));
+    if let Some(transport) = state.session.transport.lock().unwrap().as_mut() {
+        transport.send(Command::Open(timeline));
     }
 }
 

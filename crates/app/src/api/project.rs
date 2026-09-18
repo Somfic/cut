@@ -128,8 +128,8 @@ pub fn adopt(state: &State, timeline: Arc<Timeline>, path: PathBuf) {
     });
 }
 
-/// The document the session starts on. `on_disk` is false for the demo
-/// fallback, which no file holds yet — so autosave gives it one.
+/// The document the session starts on. `on_disk` is false for a project no
+/// file holds yet — so autosave gives it one.
 pub fn opened(state: &State, on_disk: bool) {
     if on_disk {
         set(state, matches_disk);

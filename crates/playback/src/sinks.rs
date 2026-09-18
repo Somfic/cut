@@ -4,14 +4,13 @@
 //! here as a stream the transport polls, so it can be scheduled against the
 //! clock rather than shown the moment it is decoded.
 
-use cut_audio::{AudioSink, Clock, Output};
+use cut_audio::AudioSink;
 use cut_media::{AudioOut, Frame, VideoOut};
 use futures::Stream;
 use futures::channel::mpsc::{self, Receiver, Sender};
 use futures::stream::FusedStream;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use std::task::{Context, Poll};
 
 /// How many decoded frames may wait before a decoder is made to stall.
@@ -53,36 +52,32 @@ impl FusedStream for VideoStream {
     }
 }
 
-/// The ends every decoder is wired to, shared by all of them.
+/// Where one track's decoders write. Deliberately only the two ends: a track
+/// has no business reaching the clock or the play flag, which belong to the
+/// [`Player`](crate::Player) that owns the playhead.
 #[derive(Clone)]
-pub struct Sinks {
-    pub clock: Arc<Clock>,
-    pub audio_sink: AudioSink,
-    pub flush_audio: Arc<AtomicBool>,
-    pub audio_playing: Arc<AtomicBool>,
-    pub video_sink: VideoSink,
+pub struct Outputs {
+    pub audio: AudioSink,
+    pub video: VideoSink,
 }
 
-impl Sinks {
-    pub fn new() -> (Self, VideoStream) {
-        let output = Output::start();
+impl Outputs {
+    pub fn new(audio: AudioSink) -> (Self, VideoStream) {
         let (sender, receiver) = mpsc::channel::<Arc<Frame>>(VIDEO_QUEUE);
 
-        let sinks = Sinks {
-            clock: output.clock,
-            audio_sink: output.sink,
-            flush_audio: output.flush,
-            audio_playing: output.playing,
-            video_sink: VideoSink(sender),
-        };
-
-        (sinks, VideoStream(receiver))
+        (
+            Outputs {
+                audio,
+                video: VideoSink(sender),
+            },
+            VideoStream(receiver),
+        )
     }
 
     /// The two callbacks a decoder is built with.
     pub fn outs(&self) -> (AudioOut, VideoOut) {
-        let audio = self.audio_sink.clone();
-        let video = self.video_sink.clone();
+        let audio = self.audio.clone();
+        let video = self.video.clone();
 
         (
             Arc::new(move |samples: &[f32]| audio.write(samples)),
